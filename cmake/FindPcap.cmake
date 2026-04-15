@@ -15,13 +15,25 @@ find_path(Pcap_INCLUDE_DIR
     /opt/homebrew/include
 )
 
-find_library(Pcap_LIBRARY
-  NAMES pcap
-  HINTS
-    /usr/lib
-    /usr/local/lib
-    /opt/homebrew/lib
-)
+# When building fully static binaries, prefer the static library.
+if(BUILD_SHARED_LIBS OR NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+  find_library(Pcap_LIBRARY
+    NAMES pcap
+    HINTS
+      /usr/lib
+      /usr/local/lib
+      /opt/homebrew/lib
+  )
+else()
+  # Look for static library first, then fall back to any.
+  find_library(Pcap_LIBRARY
+    NAMES libpcap.a pcap
+    HINTS
+      /usr/lib
+      /usr/local/lib
+      /opt/homebrew/lib
+  )
+endif()
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(Pcap
