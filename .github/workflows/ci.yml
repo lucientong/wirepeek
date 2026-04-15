@@ -74,7 +74,7 @@ jobs:
         if: matrix.coverage
         run: |
           lcov --capture --directory build --output-file coverage.info \
-            --no-external
+            --no-external --gcov-tool $(which gcov-12)
           lcov --remove coverage.info \
             '*/build/_deps/*' \
             '*/tests/*' \
