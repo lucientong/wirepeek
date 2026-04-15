@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            compiler: gcc
+            cc: gcc-12
+            cxx: g++-12
+            coverage: true
+          - os: ubuntu-22.04
+            compiler: clang
+            cc: clang-15
+            cxx: clang++-15
+            coverage: false
+          - os: ubuntu-24.04
+            compiler: gcc
+            cc: gcc-14
+            cxx: g++-14
+            coverage: false
+          - os: macos-14
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            coverage: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
+      - name: Install lcov (for coverage)
+        if: matrix.coverage
+        run: sudo apt-get install -y lcov
+
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake_flags="-DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+          if [ "${{ matrix.coverage }}" = "true" ]; then
+            cmake_flags="${cmake_flags} -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_C_FLAGS=--coverage"
+          fi
+          cmake -B build ${cmake_flags}
+
+      - name: Build
+        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Run Tests
+        working-directory: build
+        run: ctest --output-on-failure --timeout 60
+
+      - name: Generate coverage report
+        if: matrix.coverage
+        run: |
+          lcov --capture --directory build --output-file coverage.info \
+            --ignore-errors mismatch
+          lcov --remove coverage.info \
+            '*/build/_deps/*' \
+            '/usr/*' \
+            '*/tests/*' \
+            --output-file coverage.info \
+            --ignore-errors unused
+          lcov --list coverage.info
+
+      - name: Upload to Codecov
+        if: matrix.coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  lint:
+    name: Clang-Format Check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting
+        run: |
+          find include src tests -name '*.h' -o -name '*.cpp' | \
+            xargs clang-format-15 --dry-run --Werror

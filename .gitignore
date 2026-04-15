@@ -1,0 +1,41 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE files
+.idea/
+.vscode/
+.claude/
+.claude-internal/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# clangd / ccls
+.cache/
+.ccls-cache/
+
+# Coverage
+*.gcda
+*.gcno
+*.gcov
+lcov/
+
+# Local-only docs (not committed)
+PUBLISH_GUIDE.md

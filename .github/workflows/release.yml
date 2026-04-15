@@ -1,0 +1,304 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ── Build static binaries for each platform ──────────────────────────────────
+
+  build-linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    container:
+      image: alpine:3.20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apk add --no-cache \
+            build-base cmake git linux-headers \
+            libpcap-dev libpcap-static musl-dev
+
+      - name: Build static binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static" \
+            -DBUILD_TESTING=OFF
+          cmake --build build -j$(nproc)
+          strip build/src/wirepeek
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wirepeek-linux-x86_64
+          path: build/src/wirepeek
+
+  build-linux-arm64:
+    name: Linux arm64
+    runs-on: ubuntu-22.04-arm
+    container:
+      image: alpine:3.20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apk add --no-cache \
+            build-base cmake git linux-headers \
+            libpcap-dev libpcap-static musl-dev
+
+      - name: Build static binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static" \
+            -DBUILD_TESTING=OFF
+          cmake --build build -j$(nproc)
+          strip build/src/wirepeek
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wirepeek-linux-arm64
+          path: build/src/wirepeek
+
+  build-macos:
+    name: macOS Universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (arm64)
+        run: |
+          cmake -B build-arm64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DBUILD_TESTING=OFF
+          cmake --build build-arm64 -j$(sysctl -n hw.ncpu)
+
+      - name: Build (x86_64)
+        run: |
+          cmake -B build-x86_64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DBUILD_TESTING=OFF
+          cmake --build build-x86_64 -j$(sysctl -n hw.ncpu)
+
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            build-arm64/src/wirepeek \
+            build-x86_64/src/wirepeek \
+            -output wirepeek
+          strip wirepeek
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wirepeek-macos-universal
+          path: wirepeek
+
+  # ── Build .deb package ───────────────────────────────────────────────────────
+
+  build-deb:
+    name: Debian Package (amd64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev dpkg-dev
+
+      - name: Build
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+          cmake --build build -j$(nproc)
+
+      - name: Create .deb package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGING="wirepeek_${VERSION}_amd64"
+          mkdir -p "${STAGING}/DEBIAN"
+          mkdir -p "${STAGING}/usr/bin"
+
+          cp build/src/wirepeek "${STAGING}/usr/bin/"
+          strip "${STAGING}/usr/bin/wirepeek"
+
+          cat > "${STAGING}/DEBIAN/control" <<EOF
+          Package: wirepeek
+          Version: ${VERSION}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libpcap0.8 (>= 1.10)
+          Maintainer: lucientong <lucientong@users.noreply.github.com>
+          Homepage: https://github.com/lucientong/wirepeek
+          Description: High-performance network packet analyzer with modern TUI
+           Wirepeek auto-detects application-layer protocols (HTTP/gRPC/WebSocket/
+           DNS/TLS), displays at request/response level, with built-in latency
+           analysis. What btop is to top, Wirepeek is to tcpdump.
+          EOF
+
+          dpkg-deb --build "${STAGING}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wirepeek-deb
+          path: "*.deb"
+
+  # ── Create GitHub Release ────────────────────────────────────────────────────
+
+  release:
+    name: Create Release
+    needs: [build-linux-x86_64, build-linux-arm64, build-macos, build-deb]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp artifacts/wirepeek-linux-x86_64/wirepeek  release/wirepeek-linux-x86_64
+          cp artifacts/wirepeek-linux-arm64/wirepeek   release/wirepeek-linux-arm64
+          cp artifacts/wirepeek-macos-universal/wirepeek release/wirepeek-macos-universal
+          cp artifacts/wirepeek-deb/*.deb              release/wirepeek_amd64.deb
+
+          # Generate checksums
+          cd release && sha256sum * > SHA256SUMS
+
+      - name: Extract changelog for this version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" \
+            CHANGELOG.md > /tmp/release_notes.md || true
+          if [ ! -s /tmp/release_notes.md ]; then
+            echo "Release ${GITHUB_REF_NAME}" > /tmp/release_notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/release_notes.md
+          files: release/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # ── Update Homebrew Tap ──────────────────────────────────────────────────────
+
+  update-homebrew:
+    name: Update Homebrew Tap
+    needs: [release]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: lucientong/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          TAG="${VERSION#v}"
+          URL="https://github.com/lucientong/wirepeek/archive/refs/tags/${VERSION}.tar.gz"
+          SHA256=$(curl -sL "${URL}" | sha256sum | cut -d' ' -f1)
+
+          mkdir -p homebrew-tap/Formula
+
+          cat > homebrew-tap/Formula/wirepeek.rb <<RUBY
+          class Wirepeek < Formula
+            desc "High-performance network packet analyzer with modern TUI"
+            homepage "https://github.com/lucientong/wirepeek"
+            url "${URL}"
+            sha256 "${SHA256}"
+            license "Apache-2.0"
+            version "${TAG}"
+
+            depends_on "cmake" => :build
+            depends_on "libpcap"
+
+            def install
+              system "cmake", "-S", ".", "-B", "build", *std_cmake_args,
+                     "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTING=OFF"
+              system "cmake", "--build", "build"
+              system "cmake", "--install", "build"
+            end
+
+            test do
+              assert_match "wirepeek", shell_output("#{bin}/wirepeek --help")
+            end
+          end
+          RUBY
+
+      - name: Commit and push
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/wirepeek.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "wirepeek ${GITHUB_REF_NAME}"
+          git push
+
+  # ── Build and Push Docker Image ──────────────────────────────────────────────
+
+  docker:
+    name: Docker Image
+    needs: [release]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU (for arm64)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/lucientong/wirepeek:${{ steps.version.outputs.tag }}
+            ghcr.io/lucientong/wirepeek:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wirepeek:${{ steps.version.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/wirepeek:latest
