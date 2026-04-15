@@ -140,5 +140,29 @@ TEST(TcpTest, FormatFlags) {
   EXPECT_EQ(FormatTcpFlags(0), "[]");
 }
 
+TEST(TcpTest, FormatFlagsAllIndividual) {
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kFIN), "[FIN]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kACK), "[ACK]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kRST), "[RST]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kPSH), "[PSH]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kURG), "[URG]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kECE), "[ECE]");
+  EXPECT_EQ(FormatTcpFlags(tcp_flags::kCWR), "[CWR]");
+}
+
+TEST(TcpTest, FormatFlagsAllCombined) {
+  uint8_t all = tcp_flags::kFIN | tcp_flags::kSYN | tcp_flags::kRST | tcp_flags::kPSH |
+                tcp_flags::kACK | tcp_flags::kURG | tcp_flags::kECE | tcp_flags::kCWR;
+  auto result = FormatTcpFlags(all);
+  EXPECT_NE(result.find("SYN"), std::string::npos);
+  EXPECT_NE(result.find("ACK"), std::string::npos);
+  EXPECT_NE(result.find("FIN"), std::string::npos);
+  EXPECT_NE(result.find("RST"), std::string::npos);
+  EXPECT_NE(result.find("PSH"), std::string::npos);
+  EXPECT_NE(result.find("URG"), std::string::npos);
+  EXPECT_NE(result.find("ECE"), std::string::npos);
+  EXPECT_NE(result.find("CWR"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace wirepeek::dissector

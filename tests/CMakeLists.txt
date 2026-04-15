@@ -3,6 +3,9 @@ add_executable(wirepeek_tests
   unit/test_ip.cpp
   unit/test_tcp.cpp
   unit/test_udp.cpp
+  unit/test_dissect.cpp
+  unit/test_packet.cpp
+  unit/test_stream.cpp
 )
 
 target_link_libraries(wirepeek_tests PRIVATE

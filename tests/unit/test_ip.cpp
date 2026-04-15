@@ -172,5 +172,53 @@ TEST(IpTest, FormatIpv6Address) {
   EXPECT_EQ(FormatIp(addr), "2001:0db8:0000:0000:0000:0000:0000:0001");
 }
 
+TEST(IpTest, ParseIpv4WithUdpProtocol) {
+  auto pkt = MakeIpv4Header(ip_protocol::kUDP);
+  auto result = ParseIp(pkt);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->protocol, ip_protocol::kUDP);
+}
+
+TEST(IpTest, ParseIpv6WithUdpProtocol) {
+  auto pkt = MakeIpv6Header(ip_protocol::kUDP);
+  auto result = ParseIp(pkt);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->version, 6);
+  EXPECT_EQ(result->protocol, ip_protocol::kUDP);
+}
+
+TEST(IpTest, ParseIpv4WithOptions) {
+  // IHL=6 (24 bytes header), with 4 bytes of options.
+  std::vector<uint8_t> pkt = {
+      0x46,                    // Version=4, IHL=6
+      0x00,                    // DSCP/ECN
+      0x00, 0x1A,              // Total length = 26 (24 header + 2 payload)
+      0x00, 0x00, 0x40, 0x00,  // Identification, Flags, Fragment
+      0x40, 0x06,              // TTL=64, Protocol=TCP
+      0x00, 0x00,              // Checksum
+      0xC0, 0xA8, 0x01, 0x01,  // Src: 192.168.1.1
+      0x0A, 0x00, 0x00, 0x01,  // Dst: 10.0.0.1
+      0x01, 0x01, 0x01, 0x00,  // Options (4 bytes NOP padding)
+      0xDE, 0xAD,              // Payload
+  };
+  auto result = ParseIp(pkt);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->header_length, 24);
+  EXPECT_EQ(result->payload.size(), 2u);
+}
+
+TEST(IpTest, TruncatedIpv6) {
+  // Only 20 bytes — less than minimum 40 for IPv6.
+  std::vector<uint8_t> pkt(20, 0x00);
+  pkt[0] = 0x60;  // Version=6
+  auto result = ParseIp(pkt);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), DissectError::kTruncated);
+}
+
 }  // namespace
 }  // namespace wirepeek::dissector

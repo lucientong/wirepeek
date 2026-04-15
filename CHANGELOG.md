@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-15
+
+### Added
+
+- **Dissect pipeline tests**: Full end-to-end tests for `Dissect()` — TCP, UDP, ARP, truncated IP, unknown protocol, empty packet.
+- **FormatSummary tests**: Verify output format for TCP, UDP, ARP, unknown protocol, and empty packets.
+- **OwnedPacket tests**: Verify data copy semantics, `View()` round-trip, and empty packet handling.
+- **ConnectionKey tests**: Equality, inequality, hash consistency, and `std::unordered_map` integration.
+- **Additional IP tests**: IPv4 with options (IHL > 5), IPv4/IPv6 with UDP protocol, truncated IPv6.
+- **Additional TCP flag tests**: All individual flags (RST, PSH, URG, ECE, CWR) and all-flags-combined.
+
+### Changed
+
+- Test count: 26 → 53 test cases.
+
+## [0.1.3] - 2026-04-15
+## [0.1.2] - 2026-04-15
+## [0.1.1] - 2026-04-15
+
+### Added
+
+- nothing,just fix my CICD config.
+
 ## [0.1.0] - 2026-04-15
 
 ### Added
