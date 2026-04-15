@@ -21,11 +21,11 @@ namespace wirepeek::capture {
 
 /// Configuration for live packet capture.
 struct PcapConfig {
-  std::string interface;            ///< Network interface name (e.g., "eth0", "lo0").
-  std::string bpf_filter;          ///< BPF filter expression (e.g., "tcp port 80").
-  int snaplen = 65535;             ///< Maximum bytes to capture per packet.
-  int timeout_ms = 100;            ///< Read timeout in milliseconds.
-  bool promiscuous = false;        ///< Enable promiscuous mode.
+  std::string interface;     ///< Network interface name (e.g., "eth0", "lo0").
+  std::string bpf_filter;    ///< BPF filter expression (e.g., "tcp port 80").
+  int snaplen = 65535;       ///< Maximum bytes to capture per packet.
+  int timeout_ms = 100;      ///< Read timeout in milliseconds.
+  bool promiscuous = false;  ///< Enable promiscuous mode.
 };
 
 /// Live packet capture source using libpcap.

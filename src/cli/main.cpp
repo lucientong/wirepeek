@@ -9,15 +9,14 @@
 #include <wirepeek/dissector/dissect.h>
 
 #include <CLI/CLI.hpp>
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-#include <spdlog/spdlog.h>
-
 #include <atomic>
 #include <csignal>
 #include <cstdlib>
+#include <fmt/chrono.h>
+#include <fmt/format.h>
 #include <iostream>
 #include <memory>
+#include <spdlog/spdlog.h>
 #include <string>
 
 namespace {
@@ -98,8 +97,7 @@ int main(int argc, char* argv[]) {
     // Format timestamp as HH:MM:SS.microseconds.
     auto sys_time = pkt.timestamp;
     auto time_t_val = std::chrono::system_clock::to_time_t(sys_time);
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-                  sys_time.time_since_epoch()) %
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(sys_time.time_since_epoch()) %
               std::chrono::seconds(1);
     std::tm tm_val;
     localtime_r(&time_t_val, &tm_val);

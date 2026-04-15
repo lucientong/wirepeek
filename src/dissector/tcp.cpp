@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <wirepeek/dissector/tcp.h>
-
 #include <wirepeek/endian.h>
 
 #include <fmt/format.h>
-
 #include <string>
 #include <vector>
 
@@ -50,16 +48,25 @@ DissectResult<TcpInfo> ParseTcp(std::span<const uint8_t> data) {
 
 std::string FormatTcpFlags(uint8_t flags) {
   std::vector<std::string_view> names;
-  if (flags & tcp_flags::kSYN) names.push_back("SYN");
-  if (flags & tcp_flags::kACK) names.push_back("ACK");
-  if (flags & tcp_flags::kFIN) names.push_back("FIN");
-  if (flags & tcp_flags::kRST) names.push_back("RST");
-  if (flags & tcp_flags::kPSH) names.push_back("PSH");
-  if (flags & tcp_flags::kURG) names.push_back("URG");
-  if (flags & tcp_flags::kECE) names.push_back("ECE");
-  if (flags & tcp_flags::kCWR) names.push_back("CWR");
+  if (flags & tcp_flags::kSYN)
+    names.push_back("SYN");
+  if (flags & tcp_flags::kACK)
+    names.push_back("ACK");
+  if (flags & tcp_flags::kFIN)
+    names.push_back("FIN");
+  if (flags & tcp_flags::kRST)
+    names.push_back("RST");
+  if (flags & tcp_flags::kPSH)
+    names.push_back("PSH");
+  if (flags & tcp_flags::kURG)
+    names.push_back("URG");
+  if (flags & tcp_flags::kECE)
+    names.push_back("ECE");
+  if (flags & tcp_flags::kCWR)
+    names.push_back("CWR");
 
-  if (names.empty()) return "[]";
+  if (names.empty())
+    return "[]";
   return fmt::format("[{}]", fmt::join(names, ", "));
 }
 

@@ -3,9 +3,8 @@
 
 #include <wirepeek/dissector/ip.h>
 
-#include <gtest/gtest.h>
-
 #include <cstdint>
+#include <gtest/gtest.h>
 #include <vector>
 
 namespace wirepeek::dissector {
@@ -13,20 +12,29 @@ namespace {
 
 // Build a minimal valid IPv4 header (20 bytes, no options).
 std::vector<uint8_t> MakeIpv4Header(uint8_t protocol = ip_protocol::kTCP,
-                                     const std::vector<uint8_t>& payload = {0x01, 0x02}) {
+                                    const std::vector<uint8_t>& payload = {0x01, 0x02}) {
   uint16_t total_len = 20 + static_cast<uint16_t>(payload.size());
   std::vector<uint8_t> pkt = {
-      0x45,                                                       // Version=4, IHL=5
-      0x00,                                                       // DSCP/ECN
-      static_cast<uint8_t>(total_len >> 8),                       // Total length (hi)
-      static_cast<uint8_t>(total_len & 0xFF),                     // Total length (lo)
-      0x00, 0x00,                                                 // Identification
-      0x40, 0x00,                                                 // Flags=DF, Fragment offset=0
-      0x40,                                                       // TTL=64
-      protocol,                                                   // Protocol
-      0x00, 0x00,                                                 // Checksum (not validated)
-      0xC0, 0xA8, 0x01, 0x01,                                    // Src: 192.168.1.1
-      0x0A, 0x00, 0x00, 0x01,                                    // Dst: 10.0.0.1
+      0x45,                                    // Version=4, IHL=5
+      0x00,                                    // DSCP/ECN
+      static_cast<uint8_t>(total_len >> 8),    // Total length (hi)
+      static_cast<uint8_t>(total_len & 0xFF),  // Total length (lo)
+      0x00,
+      0x00,  // Identification
+      0x40,
+      0x00,      // Flags=DF, Fragment offset=0
+      0x40,      // TTL=64
+      protocol,  // Protocol
+      0x00,
+      0x00,  // Checksum (not validated)
+      0xC0,
+      0xA8,
+      0x01,
+      0x01,  // Src: 192.168.1.1
+      0x0A,
+      0x00,
+      0x00,
+      0x01,  // Dst: 10.0.0.1
   };
   pkt.insert(pkt.end(), payload.begin(), payload.end());
   return pkt;
@@ -34,20 +42,51 @@ std::vector<uint8_t> MakeIpv4Header(uint8_t protocol = ip_protocol::kTCP,
 
 // Build a minimal valid IPv6 header (40 bytes).
 std::vector<uint8_t> MakeIpv6Header(uint8_t next_header = ip_protocol::kTCP,
-                                     const std::vector<uint8_t>& payload = {0x01, 0x02}) {
+                                    const std::vector<uint8_t>& payload = {0x01, 0x02}) {
   uint16_t payload_len = static_cast<uint16_t>(payload.size());
   std::vector<uint8_t> pkt = {
-      0x60, 0x00, 0x00, 0x00,                                    // Version=6, TC, Flow Label
-      static_cast<uint8_t>(payload_len >> 8),                     // Payload length (hi)
-      static_cast<uint8_t>(payload_len & 0xFF),                   // Payload length (lo)
-      next_header,                                                // Next Header
-      0x40,                                                       // Hop Limit=64
+      0x60,
+      0x00,
+      0x00,
+      0x00,                                      // Version=6, TC, Flow Label
+      static_cast<uint8_t>(payload_len >> 8),    // Payload length (hi)
+      static_cast<uint8_t>(payload_len & 0xFF),  // Payload length (lo)
+      next_header,                               // Next Header
+      0x40,                                      // Hop Limit=64
       // Src: ::1
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
       // Dst: ::2
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x02,
   };
   pkt.insert(pkt.end(), payload.begin(), payload.end());
   return pkt;
@@ -128,7 +167,7 @@ TEST(IpTest, FormatIpv4Address) {
 
 TEST(IpTest, FormatIpv6Address) {
   Ipv6Address v6 = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
-                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
   IpAddress addr = v6;
   EXPECT_EQ(FormatIp(addr), "2001:0db8:0000:0000:0000:0000:0000:0001");
 }

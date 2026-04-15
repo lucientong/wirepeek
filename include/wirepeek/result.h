@@ -76,7 +76,8 @@ class DissectResult {
 
   template <typename F>
   auto and_then(F&& f) const -> decltype(f(std::declval<const T&>())) {
-    if (has_value()) return f(value());
+    if (has_value())
+      return f(value());
     return DissectResult<typename decltype(f(std::declval<const T&>()))::value_type>(error());
   }
 

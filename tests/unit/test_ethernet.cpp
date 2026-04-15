@@ -3,10 +3,9 @@
 
 #include <wirepeek/dissector/ethernet.h>
 
-#include <gtest/gtest.h>
-
 #include <array>
 #include <cstdint>
+#include <gtest/gtest.h>
 #include <vector>
 
 namespace wirepeek::dissector {
@@ -15,7 +14,7 @@ namespace {
 // Helper: build a minimal valid Ethernet II frame.
 // dst(6) + src(6) + type(2) + payload
 std::vector<uint8_t> MakeEthernetFrame(uint16_t ether_type,
-                                        const std::vector<uint8_t>& payload = {0xDE, 0xAD}) {
+                                       const std::vector<uint8_t>& payload = {0xDE, 0xAD}) {
   std::vector<uint8_t> frame;
   // Destination MAC: 00:11:22:33:44:55
   frame.insert(frame.end(), {0x00, 0x11, 0x22, 0x33, 0x44, 0x55});
@@ -60,10 +59,10 @@ TEST(EthernetTest, ParseVlanTaggedFrame) {
   std::vector<uint8_t> frame;
   frame.insert(frame.end(), {0x00, 0x11, 0x22, 0x33, 0x44, 0x55});  // dst
   frame.insert(frame.end(), {0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB});  // src
-  frame.insert(frame.end(), {0x81, 0x00});                            // VLAN TPID
-  frame.insert(frame.end(), {0x00, 0x64});                            // TCI: VLAN ID = 100
-  frame.insert(frame.end(), {0x08, 0x00});                            // Real type: IPv4
-  frame.insert(frame.end(), {0xCA, 0xFE});                            // payload
+  frame.insert(frame.end(), {0x81, 0x00});                          // VLAN TPID
+  frame.insert(frame.end(), {0x00, 0x64});                          // TCI: VLAN ID = 100
+  frame.insert(frame.end(), {0x08, 0x00});                          // Real type: IPv4
+  frame.insert(frame.end(), {0xCA, 0xFE});                          // payload
 
   auto result = ParseEthernet(frame);
 
@@ -89,7 +88,7 @@ TEST(EthernetTest, TruncatedVlanFrame) {
   std::vector<uint8_t> frame;
   frame.insert(frame.end(), {0x00, 0x11, 0x22, 0x33, 0x44, 0x55});  // dst
   frame.insert(frame.end(), {0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB});  // src
-  frame.insert(frame.end(), {0x81, 0x00});                            // VLAN TPID
+  frame.insert(frame.end(), {0x81, 0x00});                          // VLAN TPID
   // Missing TCI + real EtherType.
 
   auto result = ParseEthernet(frame);

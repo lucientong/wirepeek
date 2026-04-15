@@ -6,13 +6,13 @@
 
 #pragma once
 
+#include <wirepeek/result.h>
+
 #include <array>
 #include <cstdint>
 #include <span>
 #include <string>
 #include <variant>
-
-#include <wirepeek/result.h>
 
 namespace wirepeek::dissector {
 
@@ -36,8 +36,8 @@ using IpAddress = std::variant<Ipv4Address, Ipv6Address>;
 /// Parsed IP header information.
 struct IpInfo {
   uint8_t version = 0;               ///< IP version (4 or 6).
-  IpAddress src_ip;                   ///< Source IP address.
-  IpAddress dst_ip;                   ///< Destination IP address.
+  IpAddress src_ip;                  ///< Source IP address.
+  IpAddress dst_ip;                  ///< Destination IP address.
   uint8_t protocol = 0;              ///< Next-layer protocol (TCP=6, UDP=17, etc.).
   uint8_t ttl = 0;                   ///< Time-to-live (IPv4) / Hop limit (IPv6).
   uint16_t total_length = 0;         ///< Total IP packet length.

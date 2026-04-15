@@ -14,8 +14,7 @@
 namespace wirepeek {
 
 /// Microsecond-precision timestamp for packet capture times.
-using Timestamp =
-    std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>;
+using Timestamp = std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>;
 
 /// Non-owning view into captured packet data.
 ///
@@ -33,9 +32,9 @@ struct PacketView {
 /// Use this when the packet must outlive the capture buffer (e.g., for queuing
 /// to another thread).
 struct OwnedPacket {
-  std::vector<uint8_t> data;    ///< Owned copy of raw packet bytes.
-  Timestamp timestamp;          ///< Capture timestamp.
-  uint32_t original_length = 0; ///< Original packet length on the wire.
+  std::vector<uint8_t> data;     ///< Owned copy of raw packet bytes.
+  Timestamp timestamp;           ///< Capture timestamp.
+  uint32_t original_length = 0;  ///< Original packet length on the wire.
 
   /// Construct an OwnedPacket by copying from a PacketView.
   explicit OwnedPacket(const PacketView& view)

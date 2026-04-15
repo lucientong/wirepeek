@@ -3,24 +3,23 @@
 
 #include <wirepeek/capture/file_source.h>
 
+#include <chrono>
 #include <pcap/pcap.h>
 #include <spdlog/spdlog.h>
-
-#include <chrono>
 #include <stdexcept>
 
 namespace wirepeek::capture {
 
 void FileSource::PcapDeleter::operator()(pcap_t* p) const {
-  if (p) pcap_close(p);
+  if (p)
+    pcap_close(p);
 }
 
 FileSource::FileSource(const std::string& file_path) : file_path_(file_path) {
   char errbuf[PCAP_ERRBUF_SIZE];
   pcap_t* raw = pcap_open_offline(file_path.c_str(), errbuf);
   if (!raw) {
-    throw std::runtime_error(
-        fmt::format("Failed to open pcap file '{}': {}", file_path, errbuf));
+    throw std::runtime_error(fmt::format("Failed to open pcap file '{}': {}", file_path, errbuf));
   }
   handle_.reset(raw);
   spdlog::info("Opened pcap file '{}'", file_path);
@@ -42,9 +41,8 @@ void FileSource::Start(PacketCallback callback) {
     if (result == 1) {
       // Packet read successfully.
       auto ts = std::chrono::time_point_cast<std::chrono::microseconds>(
-          std::chrono::system_clock::time_point(
-              std::chrono::seconds(hdr->ts.tv_sec) +
-              std::chrono::microseconds(hdr->ts.tv_usec)));
+          std::chrono::system_clock::time_point(std::chrono::seconds(hdr->ts.tv_sec) +
+                                                std::chrono::microseconds(hdr->ts.tv_usec)));
 
       PacketView view{
           .data = std::span<const uint8_t>(bytes, hdr->caplen),

@@ -3,16 +3,16 @@
 
 #include <wirepeek/capture/pcap_source.h>
 
+#include <chrono>
 #include <pcap/pcap.h>
 #include <spdlog/spdlog.h>
-
-#include <chrono>
 #include <stdexcept>
 
 namespace wirepeek::capture {
 
 void PcapSource::PcapDeleter::operator()(pcap_t* p) const {
-  if (p) pcap_close(p);
+  if (p)
+    pcap_close(p);
 }
 
 PcapSource::PcapSource(PcapConfig config) : config_(std::move(config)) {
@@ -37,33 +37,29 @@ PcapSource::PcapSource(PcapConfig config) : config_(std::move(config)) {
   // Activate the handle.
   int status = pcap_activate(raw);
   if (status < 0) {
-    throw std::runtime_error(
-        fmt::format("Failed to activate pcap on '{}': {}", config_.interface,
-                     pcap_statustostr(status)));
+    throw std::runtime_error(fmt::format("Failed to activate pcap on '{}': {}", config_.interface,
+                                         pcap_statustostr(status)));
   }
   if (status > 0) {
-    spdlog::warn("pcap_activate warning on '{}': {}", config_.interface,
-                 pcap_statustostr(status));
+    spdlog::warn("pcap_activate warning on '{}': {}", config_.interface, pcap_statustostr(status));
   }
 
   // Apply BPF filter if specified.
   if (!config_.bpf_filter.empty()) {
     struct bpf_program fp;
     if (pcap_compile(raw, &fp, config_.bpf_filter.c_str(), 1, PCAP_NETMASK_UNKNOWN) < 0) {
-      throw std::runtime_error(
-          fmt::format("Failed to compile BPF filter '{}': {}", config_.bpf_filter,
-                       pcap_geterr(raw)));
+      throw std::runtime_error(fmt::format("Failed to compile BPF filter '{}': {}",
+                                           config_.bpf_filter, pcap_geterr(raw)));
     }
     if (pcap_setfilter(raw, &fp) < 0) {
       pcap_freecode(&fp);
-      throw std::runtime_error(
-          fmt::format("Failed to set BPF filter: {}", pcap_geterr(raw)));
+      throw std::runtime_error(fmt::format("Failed to set BPF filter: {}", pcap_geterr(raw)));
     }
     pcap_freecode(&fp);
   }
 
-  spdlog::info("Opened capture on interface '{}' (snaplen={}, filter='{}')",
-               config_.interface, config_.snaplen, config_.bpf_filter);
+  spdlog::info("Opened capture on interface '{}' (snaplen={}, filter='{}')", config_.interface,
+               config_.snaplen, config_.bpf_filter);
 }
 
 PcapSource::~PcapSource() {
@@ -81,16 +77,15 @@ void PcapSource::Start(PacketCallback callback) {
 
   CallbackContext ctx{&callback, &running_};
 
-  auto pcap_handler = [](u_char* user, const struct pcap_pkthdr* hdr,
-                          const u_char* bytes) {
+  auto pcap_handler = [](u_char* user, const struct pcap_pkthdr* hdr, const u_char* bytes) {
     auto* ctx = reinterpret_cast<CallbackContext*>(user);
-    if (!ctx->running->load(std::memory_order_relaxed)) return;
+    if (!ctx->running->load(std::memory_order_relaxed))
+      return;
 
     // Convert pcap timestamp to our Timestamp type.
     auto ts = std::chrono::time_point_cast<std::chrono::microseconds>(
-        std::chrono::system_clock::time_point(
-            std::chrono::seconds(hdr->ts.tv_sec) +
-            std::chrono::microseconds(hdr->ts.tv_usec)));
+        std::chrono::system_clock::time_point(std::chrono::seconds(hdr->ts.tv_sec) +
+                                              std::chrono::microseconds(hdr->ts.tv_usec)));
 
     PacketView view{
         .data = std::span<const uint8_t>(bytes, hdr->caplen),

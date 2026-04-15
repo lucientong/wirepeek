@@ -6,13 +6,13 @@
 
 #pragma once
 
+#include <wirepeek/result.h>
+
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
-
-#include <wirepeek/result.h>
 
 namespace wirepeek::dissector {
 
@@ -29,11 +29,11 @@ inline constexpr uint16_t kVLAN = 0x8100;
 
 /// Parsed Ethernet II frame information.
 struct EthernetInfo {
-  MacAddress src_mac{};                ///< Source MAC address.
-  MacAddress dst_mac{};                ///< Destination MAC address.
-  uint16_t ether_type = 0;            ///< EtherType (after VLAN stripping if present).
-  std::optional<uint16_t> vlan_id;    ///< VLAN ID if 802.1Q tagged.
-  std::span<const uint8_t> payload;   ///< Payload after Ethernet header.
+  MacAddress src_mac{};              ///< Source MAC address.
+  MacAddress dst_mac{};              ///< Destination MAC address.
+  uint16_t ether_type = 0;           ///< EtherType (after VLAN stripping if present).
+  std::optional<uint16_t> vlan_id;   ///< VLAN ID if 802.1Q tagged.
+  std::span<const uint8_t> payload;  ///< Payload after Ethernet header.
 };
 
 /// Parse an Ethernet II frame.

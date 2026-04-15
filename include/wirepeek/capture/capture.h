@@ -19,9 +19,9 @@ using PacketCallback = std::function<void(const PacketView&)>;
 
 /// Capture statistics.
 struct CaptureStats {
-  uint64_t packets_received = 0;   ///< Packets received by the filter.
-  uint64_t packets_dropped = 0;    ///< Packets dropped by the kernel.
-  uint64_t packets_if_dropped = 0; ///< Packets dropped by the network interface.
+  uint64_t packets_received = 0;    ///< Packets received by the filter.
+  uint64_t packets_dropped = 0;     ///< Packets dropped by the kernel.
+  uint64_t packets_if_dropped = 0;  ///< Packets dropped by the network interface.
 };
 
 /// Abstract base class for packet capture sources.

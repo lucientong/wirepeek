@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <wirepeek/dissector/udp.h>
-
 #include <wirepeek/endian.h>
 
 namespace wirepeek::dissector {
@@ -25,8 +24,8 @@ DissectResult<UdpInfo> ParseUdp(std::span<const uint8_t> data) {
   // Payload length: use declared length minus header, clamped to available data.
   size_t payload_len = 0;
   if (info.length > kUdpHeaderLen) {
-    payload_len = std::min(static_cast<size_t>(info.length - kUdpHeaderLen),
-                           data.size() - kUdpHeaderLen);
+    payload_len =
+        std::min(static_cast<size_t>(info.length - kUdpHeaderLen), data.size() - kUdpHeaderLen);
   }
   info.payload = data.subspan(kUdpHeaderLen, payload_len);
 

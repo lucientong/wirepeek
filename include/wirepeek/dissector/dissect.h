@@ -6,14 +6,14 @@
 
 #pragma once
 
-#include <optional>
-#include <string>
-
 #include <wirepeek/dissector/ethernet.h>
 #include <wirepeek/dissector/ip.h>
 #include <wirepeek/dissector/tcp.h>
 #include <wirepeek/dissector/udp.h>
 #include <wirepeek/packet.h>
+
+#include <optional>
+#include <string>
 
 namespace wirepeek::dissector {
 

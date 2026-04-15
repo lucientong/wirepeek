@@ -6,20 +6,20 @@
 
 #pragma once
 
+#include <wirepeek/result.h>
+
 #include <cstdint>
 #include <span>
-
-#include <wirepeek/result.h>
 
 namespace wirepeek::dissector {
 
 /// Parsed UDP header information.
 struct UdpInfo {
-  uint16_t src_port = 0;              ///< Source port.
-  uint16_t dst_port = 0;              ///< Destination port.
-  uint16_t length = 0;                ///< Total UDP datagram length (header + payload).
-  uint16_t checksum = 0;              ///< UDP checksum.
-  std::span<const uint8_t> payload;   ///< Payload after UDP header.
+  uint16_t src_port = 0;             ///< Source port.
+  uint16_t dst_port = 0;             ///< Destination port.
+  uint16_t length = 0;               ///< Total UDP datagram length (header + payload).
+  uint16_t checksum = 0;             ///< UDP checksum.
+  std::span<const uint8_t> payload;  ///< Payload after UDP header.
 };
 
 /// Parse a UDP header.

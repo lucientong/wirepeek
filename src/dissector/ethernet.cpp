@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <wirepeek/dissector/ethernet.h>
-
 #include <wirepeek/endian.h>
 
+#include <algorithm>
 #include <fmt/format.h>
 
 namespace wirepeek::dissector {
