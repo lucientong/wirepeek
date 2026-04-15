@@ -7,6 +7,7 @@
 #include <wirepeek/capture/file_source.h>
 #include <wirepeek/capture/pcap_source.h>
 #include <wirepeek/dissector/dissect.h>
+#include <wirepeek/dissector/tcp_reassembler.h>
 
 #include <CLI/CLI.hpp>
 #include <atomic>
@@ -28,6 +29,15 @@ void SignalHandler(int /*signum*/) {
   g_running = false;
 }
 
+void PrintTimestamp(wirepeek::Timestamp ts) {
+  auto time_t_val = std::chrono::system_clock::to_time_t(ts);
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()) %
+            std::chrono::seconds(1);
+  std::tm tm_val;
+  localtime_r(&time_t_val, &tm_val);
+  fmt::print("{:%H:%M:%S}.{:06d}", tm_val, us.count());
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -39,6 +49,7 @@ int main(int argc, char* argv[]) {
   bool headless = false;
   int count = 0;  // 0 = unlimited
   bool verbose = false;
+  bool no_reassemble = false;
 
   app.add_option("-i,--interface", interface, "Network interface to capture on");
   app.add_option("-f,--filter", bpf_filter, "BPF filter expression");
@@ -46,6 +57,7 @@ int main(int argc, char* argv[]) {
   app.add_flag("--headless", headless, "Headless mode (no TUI, tcpdump-like output)");
   app.add_option("-c,--count", count, "Number of packets to capture (0=unlimited)");
   app.add_flag("-v,--verbose", verbose, "Enable verbose logging");
+  app.add_flag("--no-reassemble", no_reassemble, "Disable TCP stream reassembly");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -82,6 +94,28 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  // Set up TCP reassembler.
+  std::unique_ptr<wirepeek::dissector::TcpReassembler> reassembler;
+  if (!no_reassemble) {
+    reassembler = std::make_unique<wirepeek::dissector::TcpReassembler>(
+        [](const wirepeek::dissector::StreamEvent& event) {
+          const char* dir_str = (event.direction == wirepeek::StreamDirection::kClientToServer)
+                                    ? "client->server"
+                                    : "server->client";
+          switch (event.type) {
+            case wirepeek::dissector::StreamEventType::kOpen:
+              fmt::print("[stream open] {}\n", dir_str);
+              break;
+            case wirepeek::dissector::StreamEventType::kData:
+              fmt::print("[stream data] {} bytes ({})\n", event.data.size(), dir_str);
+              break;
+            case wirepeek::dissector::StreamEventType::kClose:
+              fmt::print("[stream close]\n");
+              break;
+          }
+        });
+  }
+
   // Capture and dissect packets.
   uint64_t packet_count = 0;
 
@@ -94,21 +128,27 @@ int main(int argc, char* argv[]) {
     auto dissected = wirepeek::dissector::Dissect(pkt);
     auto summary = wirepeek::dissector::FormatSummary(dissected);
 
-    // Format timestamp as HH:MM:SS.microseconds.
-    auto sys_time = pkt.timestamp;
-    auto time_t_val = std::chrono::system_clock::to_time_t(sys_time);
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(sys_time.time_since_epoch()) %
-              std::chrono::seconds(1);
-    std::tm tm_val;
-    localtime_r(&time_t_val, &tm_val);
+    PrintTimestamp(pkt.timestamp);
+    fmt::print("  {}\n", summary);
 
-    fmt::print("{:%H:%M:%S}.{:06d}  {}\n", tm_val, us.count(), summary);
+    // Feed to reassembler.
+    if (reassembler) {
+      reassembler->ProcessPacket(dissected, pkt.timestamp);
+    }
 
     ++packet_count;
     if (count > 0 && packet_count >= static_cast<uint64_t>(count)) {
       source->Stop();
     }
   });
+
+  // Flush remaining streams.
+  if (reassembler) {
+    auto now =
+        std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::system_clock::now());
+    reassembler->FlushExpired(now);
+    fmt::print(stderr, "{} active TCP streams at exit\n", reassembler->StreamCount());
+  }
 
   // Print statistics.
   auto stats = source->Stats();

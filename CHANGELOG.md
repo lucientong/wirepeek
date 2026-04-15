@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **TCP stream reassembly** (`TcpReassembler`): Tracks TCP connections, reorders out-of-order segments, and delivers contiguous in-order byte streams via callback.
+  - 3-way handshake detection (SYN → SYN-ACK → Established).
+  - Bidirectional stream tracking (client→server and server→client).
+  - Out-of-order segment buffering and automatic flush when gaps are filled.
+  - Retransmission detection ("first wins" strategy).
+  - Connection close handling (FIN from both sides, RST immediate close).
+  - Idle stream timeout with configurable expiry (default 30s).
+  - Mid-flow join support (streams joined without seeing SYN).
+  - Per-stream memory limits (default 10MB) and max concurrent streams (default 1000).
+  - Sequence number wraparound handling via signed 32-bit comparison.
+- **`StreamDirection` enum**: `kClientToServer` / `kServerToClient` in `stream.h`.
+- **CLI integration**: `--no-reassemble` flag; stream events printed in headless mode.
+- **10 new unit tests** for TCP reassembly: handshake, in-order delivery, out-of-order, retransmission, FIN/RST close, timeout, mid-flow join, bidirectional data, non-TCP ignore.
+
 ## [0.1.4] - 2026-04-15
 
 ### Added

@@ -1,0 +1,218 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    WIREPEEK ARCHITECTURE - PHASE 1 & 2                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+PHASE 1: PACKET CAPTURE & DISSECTION (COMPLETE)
+═════════════════════════════════════════════════
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    CAPTURE SOURCE                           │
+    │  (pcap live / pcap file / custom sources)                  │
+    │                                                              │
+    │  • PacketView (zero-copy reference into buffer)            │
+    │  • Microsecond timestamps                                  │
+    │  • Capture statistics                                      │
+    └──────────────────────┬──────────────────────────────────────┘
+                           │ callback: PacketView → void
+                           ↓
+    ┌─────────────────────────────────────────────────────────────┐
+    │            DISSECTION PIPELINE (Dissect)                   │
+    │                                                              │
+    │  Layer 2: ParseEthernet()   → EthernetInfo                │
+    │           └─ MAC, EtherType, payload                       │
+    │  Layer 3: ParseIp()         → IpInfo                        │
+    │           └─ IP addresses, protocol, payload               │
+    │  Layer 4: ParseTcp/Udp()    → TcpInfo / UdpInfo           │
+    │           └─ Ports, seq/ack, flags, payload               │
+    │                                                              │
+    │  Output: DissectedPacket = {eth, ip, tcp/udp}             │
+    └──────────────────────┬──────────────────────────────────────┘
+                           │
+                           ↓
+    ┌─────────────────────────────────────────────────────────────┐
+    │          CLI / OUTPUT (Current: tcpdump style)             │
+    │                                                              │
+    │  Format + Print: "192.168.1.1:443 → 10.0.0.1:54321 TCP  │
+    │                   [SYN, ACK] len=0"                        │
+    │                                                              │
+    │  Then DISCARD packet (no buffering across packets)         │
+    └─────────────────────────────────────────────────────────────┘
+
+
+PHASE 2: TCP STREAM REASSEMBLY (NEW)
+═════════════════════════════════════════════════════════════════
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │          DISSECTED PACKET + OwnedPacket copy                │
+    └──────────────────────┬──────────────────────────────────────┘
+                           │
+                           ↓
+    ╔═════════════════════════════════════════════════════════════╗
+    ║         TCP REASSEMBLER (NEW in Phase 2)                   ║
+    ║                                                              ║
+    ║  ProcessPacket(dissected, packet)                          ║
+    ║  ├─ Extract ConnectionKey (5-tuple)                        ║
+    ║  ├─ Extract TcpInfo (seq, ack, flags, payload)            ║
+    ║  ├─ Create OwnedPacket copy (survives capture buffer)     ║
+    ║  └─ Route to appropriate per-stream state                  ║
+    ║                                                              ║
+    ║  ┌────────────────────────────────────────────────────┐    ║
+    ║  │ Connection Table: Map<ConnectionKey, StreamState> │    ║
+    ║  │                                                    │    ║
+    ║  │ StreamState = {                                   │    ║
+    ║  │   next_seq,           // Expected sequence        │    ║
+    ║  │   buffered_segments,  // Out-of-order segments   │    ║
+    ║  │   reassembled_data,   // In-order output buffer  │    ║
+    ║  │   connection_flags,   // SYN/FIN/RST tracking    │    ║
+    ║  │   stats               // Metrics                  │    ║
+    ║  │ }                                                  │    ║
+    ║  └────────────────────────────────────────────────────┘    ║
+    ║                                                              ║
+    ║  Segment Processing Flow:                                  ║
+    ║  ├─ Is this SYN? → Initialize stream                      ║
+    ║  ├─ Is seq == next_seq? → Append to output buffer         ║
+    ║  ├─ Is seq > next_seq? → Buffer (reordered)               ║
+    ║  ├─ Is seq + len < next_seq? → Ignore (retransmit)       ║
+    ║  ├─ Is overlapping? → Merge intelligently                 ║
+    ║  ├─ Is PSH/FIN/complete_gap? → Emit accumulated data      ║
+    ║  └─ Is FIN/RST? → Mark stream complete, emit final        ║
+    ║                                                              ║
+    ║  Flush() on EOF or timeout                                 ║
+    ╚═════════════════════════════════════════════════════════════╝
+                           │
+                           ↓
+    ┌─────────────────────────────────────────────────────────────┐
+    │       STREAM CALLBACK / OUTPUT                              │
+    │                                                              │
+    │  For each completed segment:                               │
+    │  - ConnectionKey (identifies direction)                    │
+    │  - Reassembled bytes (in-order, payload only)             │
+    │  - Is_final (stream closed?)                              │
+    │  - Timestamp (last activity)                              │
+    │                                                              │
+    │  Key insight: DATA IS NOW IN ORDER AND CONTIGUOUS         │
+    │              (ready for HTTP parsing)                      │
+    └─────────────────────────────────────────────────────────────┘
+
+
+PHASE 3: APPLICATION LAYER PARSING (Future)
+═════════════════════════════════════════════════════════════════
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │          HTTP REQUEST/RESPONSE PARSER                       │
+    │                                                              │
+    │  Consumes: Reassembled TCP streams (ConnectionKey + bytes) │
+    │  Produces: Structured HTTP requests/responses              │
+    │            (path, method, headers, body)                   │
+    └─────────────────────────────────────────────────────────────┘
+
+
+DATA STRUCTURE RELATIONSHIPS
+═════════════════════════════════════════════════════════════════
+
+    PacketView (zero-copy, hot-path)
+    ├─ Used by: Dissect(), capture callbacks
+    └─ Lifetime: While in capture buffer (~ms)
+
+            ↓ (converted to)
+
+    OwnedPacket (copy)
+    ├─ Used by: Reassembler (long-term storage)
+    └─ Lifetime: Until stream completes (~seconds-minutes)
+
+            ↓ (accumulated in)
+
+    StreamState (per ConnectionKey)
+    ├─ buffered_segments: Map<seq, OwnedPacket>
+    ├─ reassembled_data: Vec<u8> (contiguous)
+    └─ Emitted via callback when complete
+
+
+THREADING MODEL (Implicit)
+═════════════════════════════════════════════════════════════════
+
+    Current (Phase 1):
+    - Single-threaded capture loop
+    - Synchronous dissection
+    - Immediate output
+
+    Phase 2 (Conservative):
+    - Reassembler is thread-safe (future concern)
+    - Input: capture callback (hot-path)
+    - Output: via callback (application decides buffering)
+
+    Phase 4+ (TUI):
+    - May use background thread for reassembly
+    - Decouple capture from display
+
+
+FILE STRUCTURE
+═════════════════════════════════════════════════════════════════
+
+include/wirepeek/
+├── packet.h                  ← PacketView, OwnedPacket
+├── stream.h                  ← ConnectionKey (5-tuple)
+├── request.h                 ← Phase 3 (application layer)
+├── result.h                  ← DissectResult<T> (error handling)
+├── dissector/
+│   ├── dissect.h             ← DissectedPacket, Dissect()
+│   ├── ethernet.h            ← Layer 2
+│   ├── ip.h                  ← Layer 3
+│   ├── tcp.h                 ← Layer 4 (TcpInfo)
+│   └── udp.h                 ← Layer 4
+├── capture/
+│   ├── capture.h             ← CaptureSource base class
+│   ├── pcap_source.h         ← Live capture
+│   └── file_source.h         ← pcap file reading
+└── reassembler/              ← NEW in Phase 2
+    └── tcp_reassembler.h     ← TcpReassembler class
+
+src/
+├── dissector/                ← Implementation
+│   ├── dissect.cpp
+│   ├── ethernet.cpp
+│   ├── ip.cpp
+│   ├── tcp.cpp
+│   └── udp.cpp
+├── capture/                  ← Implementation
+│   ├── pcap_source.cpp
+│   └── file_source.cpp
+├── reassembler/              ← NEW in Phase 2
+│   └── tcp_reassembler.cpp
+└── cli/
+    └── main.cpp              ← Entry point (to be modified)
+
+
+KEY DECISIONS FOR PHASE 2
+═════════════════════════════════════════════════════════════════
+
+1. DIRECTION TRACKING
+   • One ConnectionKey → Both directions of flow
+   • Must distinguish client→server vs server→client
+   • Use src_ip/src_port as "canonical" + flag?
+   • OR: Two streams per connection (both directions)?
+   → Decision: Store both directions in separate StreamState
+
+2. SEQUENCE NUMBER WRAPAROUND
+   • TCP sequence numbers wrap at 2^32
+   • Must compare with special logic (not simple </>)
+   → Use: bool seq_less_than(uint32_t a, uint32_t b)
+
+3. RETRANSMISSION HANDLING
+   • Same seq_num, len might vary (SACK, path MTU)
+   • How to merge? Use first? Latest? Longest?
+   → Use: "first arrived wins" (simpler, matches tcpdump behavior)
+
+4. OUT-OF-ORDER BUFFERING
+   • Max buffer size? (Memory DoS protection)
+   → Configurable: Default 10MB per stream, 100MB total
+
+5. TIMEOUT
+   • When to auto-close idle streams?
+   → Configurable: Default 30s idle = auto-close
+
+6. OUTPUT FREQUENCY
+   • Emit on every segment? On PSH? On gap-fill? On FIN?
+   → Emit when: continuous data available OR PSH OR FIN
+   →           (let application decide further batching)
+

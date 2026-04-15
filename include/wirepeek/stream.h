@@ -12,6 +12,12 @@
 
 namespace wirepeek {
 
+/// Direction of data within a TCP stream.
+enum class StreamDirection : uint8_t {
+  kClientToServer = 0,  ///< Client (SYN initiator) → Server.
+  kServerToClient = 1,  ///< Server → Client.
+};
+
 /// 5-tuple connection key for TCP/UDP flow identification.
 struct ConnectionKey {
   std::array<uint8_t, 16> src_ip{};  ///< Source IP (4 bytes for IPv4, 16 for IPv6).

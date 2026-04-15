@@ -145,7 +145,7 @@ See [Architecture Documentation](docs/en/architecture.md) for detailed design.
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Capture + basic dissectors (Ethernet/IP/TCP/UDP) | ✅ Done |
-| 2 | TCP stream reassembly | ⬜ Planned |
+| 2 | TCP stream reassembly | ✅ Done |
 | 3 | HTTP/1.1 parsing + protocol detection | ⬜ Planned |
 | 4 | TUI (FTXUI) | ⬜ Planned |
 | 5 | Latency analysis + statistics | ⬜ Planned |

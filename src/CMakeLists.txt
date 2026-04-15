@@ -6,6 +6,7 @@ add_library(wirepeek_lib STATIC
   dissector/tcp.cpp
   dissector/udp.cpp
   dissector/dissect.cpp
+  dissector/tcp_reassembler.cpp
   capture/pcap_source.cpp
   capture/file_source.cpp
 )

@@ -1,0 +1,321 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║       WIREPEEK PROJECT EXPLORATION SUMMARY - Phase 2 TCP Reassembly           ║
+║                           April 14, 2026                                       ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+EXPLORATION COMPLETED ✅
+═════════════════════════════════════════════════════════════════════════════════
+
+This exploration analyzed the wirepeek project to understand:
+1. What data structures exist for stream tracking
+2. How the dissection pipeline currently works
+3. Where TCP reassembly would plug in
+4. What the output should feed into (for Phase 3: HTTP parsing)
+
+Files analyzed: 13 headers + 8 implementations + 2 CMakeLists
+Total LOC: ~2000 lines of production code + tests
+Dependencies: fmt, spdlog, pcap, cli11, xxhash, ftxui, googletest
+
+═════════════════════════════════════════════════════════════════════════════════
+
+KEY FINDINGS
+═════════════════════════════════════════════════════════════════════════════════
+
+✅ WHAT ALREADY EXISTS
+──────────────────────────────────────────────────────────────────────────────────
+
+1. ConnectionKey (include/wirepeek/stream.h)
+   ✓ 5-tuple structure: src_ip, dst_ip, src_port, dst_port, protocol
+   ✓ IPv4/IPv6 support (16-byte arrays)
+   ✓ Custom FNV-1a hash for unordered_map storage
+   ✓ Equality comparison implemented
+   → READY for stream identification
+
+2. Packet Data Structures (include/wirepeek/packet.h)
+   ✓ PacketView: zero-copy view (hot-path, capture buffer lifetime)
+   ✓ OwnedPacket: owned copy (can outlive capture buffer)
+   ✓ Microsecond-precision timestamps
+   ✓ View() conversion method
+   → READY for reassembly buffering
+
+3. Dissection Pipeline (include/wirepeek/dissector/)
+   ✓ Layer 2: Ethernet (MAC, EtherType, VLAN support)
+   ✓ Layer 3: IPv4/IPv6 (addresses, protocol, TTL)
+   ✓ Layer 4: TCP (seq, ack, flags, payload as span<>)
+   ✓ Graceful degradation (stops at first unsupported layer)
+   ✓ All payloads are zero-copy spans
+   → READY to feed into reassembler
+
+4. Error Handling (include/wirepeek/result.h)
+   ✓ DissectResult<T> (expected<T, DissectError>)
+   ✓ Error codes: Truncated, InvalidHeader, UnsupportedVersion, ChecksumError
+   ✓ Fallback for C++ < 23 (variant-based)
+   → READY for error propagation
+
+5. Build System
+   ✓ CMake 3.20+
+   ✓ FetchContent for dependencies
+   ✓ xxhash already linked (for hashing ConnectionKey)
+   ✓ Static library + executable pattern
+   → READY to add reassembler module
+
+6. CLI Structure (src/cli/main.cpp)
+   ✓ Callback-based packet processing (hot-path compatible)
+   ✓ Signal handling (SIGINT/SIGTERM)
+   ✓ Capture statistics gathering
+   ✓ Headless mode (no TUI yet)
+   → READY for reassembler integration
+
+❌ WHAT'S MISSING FOR PHASE 2
+──────────────────────────────────────────────────────────────────────────────────
+
+1. Stream Reassembler Class
+   ✗ No TcpReassembler in codebase
+   ✗ No segment reordering logic
+   ✗ No stream state tracking per ConnectionKey
+   → MUST CREATE: include/wirepeek/reassembler/tcp_reassembler.h
+
+2. Stream State Management
+   ✗ No per-stream buffering for out-of-order segments
+   ✗ No sequence number tracking (ISN, next_expected)
+   ✗ No connection lifecycle tracking (SYN/FIN/RST)
+   ✗ No timeout handling
+   → MUST IMPLEMENT: Internal PerStreamState struct
+
+3. Segment Assembly Algorithm
+   ✗ No in-order reassembly logic
+   ✗ No sequence number wraparound handling
+   ✗ No retransmission detection/merging
+   ✗ No buffer limit enforcement
+   → MUST IMPLEMENT: MaybeAppendSegment() and gap-filling
+
+4. Output Emission
+   ✗ No callback mechanism for reassembled streams
+   ✗ No stream completion detection
+   ✗ No flush-on-timeout or EOF
+   → MUST DESIGN: StreamDataCallback and output protocol
+
+5. Integration Points
+   ✗ CLI not using reassembler yet
+   ✗ No --reassemble flag
+   ✗ No reassembly statistics output
+   → MUST MODIFY: src/cli/main.cpp
+
+═════════════════════════════════════════════════════════════════════════════════
+
+ARCHITECTURAL INSIGHTS
+═════════════════════════════════════════════════════════════════════════════════
+
+Current Data Flow (Phase 1):
+┌──────────┐  ┌────────────┐  ┌──────────────┐  ┌────────┐
+│  Capture │→ │  Dissect   │→ │  Format +    │→ │ Discard│
+│ (PacketView)│ (DissectedPacket) │ Print      │  │        │
+└──────────┘  └────────────┘  └──────────────┘  └────────┘
+              (hot-path)       (tcpdump output) (no memory)
+
+Proposed Data Flow (Phase 2):
+┌──────────┐  ┌────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌────────────┐
+│  Capture │→ │  Dissect   │→ │ TCP Reassembler  │→ │ Stream      │→ │ Phase 3:  │
+│ (PacketView)│ (Dissected │→ │ (per-stream      │  │ Callback    │  │ HTTP/gRPC │
+└──────────┘  │  Packet)   │  │  buffering)      │  │             │  │ Parser    │
+              └────────────┘  └──────────────────┘  └──────────────┘  └────────────┘
+                              ↓
+                         OwnedPacket
+                         (long-lived)
+
+Key Insight:
+- PacketView is zero-copy but short-lived (capture buffer lifetime)
+- Reassembler converts to OwnedPacket (can survive buffer)
+- Output is ordered, contiguous bytes (perfect for HTTP parser)
+- Bidirectional: One ConnectionKey stores both directions
+
+═════════════════════════════════════════════════════════════════════════════════
+
+CRITICAL DECISIONS FOR IMPLEMENTATION
+═════════════════════════════════════════════════════════════════════════════════
+
+1. DIRECTION HANDLING
+   Decision: One ConnectionKey → Both directions tracked in same table
+   Rationale: ConnectionKey already normalized (hash works both ways)
+             Need to distinguish src→dst from dst→src somehow
+   Solution: Add StreamDirection enum {kClientToServer, kServerToClient}
+             to ReassembledStream output; track per-direction state
+
+2. SEQUENCE NUMBER COMPARISON
+   Decision: Use signed comparison for wraparound
+   Code: inline bool seq_less(uint32_t a, uint32_t b) {
+           return static_cast<int32_t>(a - b) < 0;
+         }
+   Rationale: Handles 2^32 wraparound naturally (RFC 1323)
+             Works for any monotonic sequence (not just 0-based)
+
+3. RETRANSMISSION HANDLING
+   Decision: "First arrived wins" (ignore duplicates)
+   Rationale: Simpler, matches tcpdump behavior
+             Avoids complexity of merging overlapping segments
+   Note: May miss genuine retransmitted data with different content
+
+4. BUFFER LIMITS (DoS Protection)
+   Decision: Configurable per-stream (10MB) + global (100MB)
+   Rationale: Prevents memory exhaustion on large gaps
+             Global limit catches pathological multi-stream scenarios
+   Implementation: Enforce in MaybeAppendSegment()
+
+5. EMISSION FREQUENCY
+   Decision: Emit on PSH, FIN, or when gap-filling complete
+   Rationale: Lets application decide batching (Phase 3 concern)
+             PSH signals "message boundary" per TCP semantics
+             FIN = final data
+   Callback: Called multiple times per stream, final=true on close
+
+6. TIMEOUT HANDLING
+   Decision: Configurable idle timeout (default 30s)
+   Rationale: Allow cleanup of stale connections
+             Necessary for long capture sessions
+   Mechanism: Tracked via last_activity_time, expired on Flush()
+
+═════════════════════════════════════════════════════════════════════════════════
+
+INTEGRATION POINTS (What Changes)
+═════════════════════════════════════════════════════════════════════════════════
+
+1. NEW FILES
+   ✓ include/wirepeek/reassembler/tcp_reassembler.h (250-300 LOC)
+   ✓ src/reassembler/tcp_reassembler.cpp (400-500 LOC)
+
+2. MODIFIED FILES
+   ✓ src/CMakeLists.txt (add reassembler/tcp_reassembler.cpp)
+   ✓ src/cli/main.cpp (add reassembler integration, ~50 LOC)
+
+3. UNCHANGED FILES
+   • All dissector files (still needed for packet parsing)
+   • All capture files (still needed for packet capture)
+   • All build dependencies
+
+═════════════════════════════════════════════════════════════════════════════════
+
+PHASE 3 INPUT INTERFACE (Future)
+═════════════════════════════════════════════════════════════════════════════════
+
+The HTTP parser (Phase 3) will receive:
+
+struct ReassembledStream {
+  wirepeek::ConnectionKey conn;              // Which flow?
+  std::vector<uint8_t> data;                 // In-order bytes (payload)
+  wirepeek::Timestamp last_activity;         // Latest packet time
+  bool is_complete;                          // FIN/RST seen?
+  StreamDirection direction;                 // Client→Server or vice-versa?
+};
+
+Key properties for HTTP parsing:
+✓ Data is ordered (seq_num monotonically increasing)
+✓ Data is contiguous (gaps buffered until filled or timeout)
+✓ Direction is explicit (needed to identify requests vs responses)
+✓ Completeness is signaled (can emit partial streams or wait for FIN)
+
+═════════════════════════════════════════════════════════════════════════════════
+
+TESTING STRATEGY
+═════════════════════════════════════════════════════════════════════════════════
+
+Unit Tests (cpp):
+  ✓ Sequence number comparison with wraparound
+  ✓ Segment insertion (in-order, out-of-order, overlapping)
+  ✓ Gap filling when buffered segments arrive
+  ✓ Buffer limit enforcement
+  ✓ Stream state transitions (SYN → DATA → FIN)
+
+Integration Tests (with real pcaps):
+  ✓ Single TCP stream with all segments in-order
+  ✓ Out-of-order segment arrival (reorder in buffer)
+  ✓ Retransmitted segments (duplicate detection)
+  ✓ Multiple simultaneous streams (connection multiplexing)
+  ✓ Stream close with FIN (final data emission)
+  ✓ Stream abort with RST (no buffered data loss)
+  ✓ Timeout-based cleanup (idle stream expiry)
+
+Performance Tests:
+  ✓ Throughput (Gbps reassembly rate)
+  ✓ Memory per stream (MB buffer usage)
+  ✓ Latency (packet arrival to output callback)
+
+═════════════════════════════════════════════════════════════════════════════════
+
+RECOMMENDED NEXT STEPS
+═════════════════════════════════════════════════════════════════════════════════
+
+1. IMPLEMENT PHASE 2a (Foundation)
+   □ Create header file with TcpReassembler API
+   □ Implement basic segment buffering
+   □ Add SYN/FIN/RST handling
+   □ Write unit tests
+   Estimated: 4-6 hours
+
+2. IMPLEMENT PHASE 2b (Integration)
+   □ Integrate into CLI capture loop
+   □ Add stream callback output
+   □ Test with real pcap files
+   □ Add statistics output
+   Estimated: 2-3 hours
+
+3. IMPLEMENT PHASE 2c (Advanced)
+   □ Add out-of-order segment buffering
+   □ Implement sequence number wraparound
+   □ Add timeout handling
+   □ Add buffer limits
+   Estimated: 4-6 hours
+
+4. TEST & OPTIMIZE
+   □ Run comprehensive test suite
+   □ Benchmark throughput
+   □ Memory profiling
+   □ Handle edge cases
+   Estimated: 4-6 hours
+
+Total Estimated Effort: 14-21 hours
+
+═════════════════════════════════════════════════════════════════════════════════
+
+DOCUMENTATION FILES CREATED
+═════════════════════════════════════════════════════════════════════════════════
+
+1. PHASE2_EXPLORATION.md (this exploration report)
+   - Detailed analysis of current architecture
+   - Data structures and dissection pipeline
+   - Design points for reassembly
+   - API shape recommendations
+
+2. ARCHITECTURE_OVERVIEW.txt (visual diagrams)
+   - Phase 1 pipeline diagram
+   - Phase 2 reassembler diagram
+   - Data flow and structure relationships
+   - Threading model and file structure
+   - Key design decisions
+
+3. PHASE2_IMPLEMENTATION_ROADMAP.md (detailed roadmap)
+   - Complete API definition
+   - Implementation layer breakdown
+   - CLI integration code sketch
+   - Build system changes
+   - Implementation checklist
+   - Testing strategy
+
+4. EXPLORATION_SUMMARY.txt (this file)
+   - Executive summary
+   - Key findings
+   - Critical decisions
+   - Integration points
+   - Next steps
+
+═════════════════════════════════════════════════════════════════════════════════
+
+STATUS: READY FOR IMPLEMENTATION ✅
+═════════════════════════════════════════════════════════════════════════════════
+
+All analysis complete. Project structure well-understood. API design finalized.
+Ready to proceed with Phase 2 implementation.
+
+Question Answer: TCP reassembly is a well-defined module that can be
+implemented independently, then integrated into the CLI via callbacks.
+The output (reassembled streams) feeds directly into Phase 3 (HTTP parser).
+
