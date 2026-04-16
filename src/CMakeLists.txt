@@ -15,6 +15,9 @@ add_library(wirepeek_lib STATIC
   protocol/protocol_handler.cpp
   analyzer/tdigest.cpp
   analyzer/statistics.cpp
+  export/pcap_writer.cpp
+  export/har_writer.cpp
+  export/json_writer.cpp
   tui/app.cpp
   capture/pcap_source.cpp
   capture/file_source.cpp
@@ -22,6 +25,7 @@ add_library(wirepeek_lib STATIC
 
 target_include_directories(wirepeek_lib PUBLIC
   ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_BINARY_DIR}/generated
 )
 
 target_link_libraries(wirepeek_lib PUBLIC

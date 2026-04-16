@@ -150,7 +150,7 @@ See [Architecture Documentation](docs/en/architecture.md) for detailed design.
 | 4 | TUI (FTXUI) | ✅ Done |
 | 5 | Latency analysis + statistics | ✅ Done |
 | 6 | HTTP/2, gRPC, DNS, TLS, WebSocket | ✅ Done |
-| 7 | Export (pcap/HAR/JSON) | ⬜ Planned |
+| 7 | Export (pcap/HAR/JSON) | ✅ Done |
 | 8 | TUI polish + filters + charts | ⬜ Planned |
 
 ## Contributing

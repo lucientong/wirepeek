@@ -1,0 +1,14 @@
+// Copyright 2026 lucientong
+// SPDX-License-Identifier: Apache-2.0
+
+/// @file version.h
+/// @brief Project version — auto-generated from CMakeLists.txt at configure time.
+
+#pragma once
+
+// clang-format off
+#define WIREPEEK_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define WIREPEEK_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define WIREPEEK_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define WIREPEEK_VERSION "@PROJECT_VERSION@"
+// clang-format on

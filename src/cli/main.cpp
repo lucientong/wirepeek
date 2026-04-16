@@ -8,9 +8,13 @@
 #include <wirepeek/capture/pcap_source.h>
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/tcp_reassembler.h>
+#include <wirepeek/export/har_writer.h>
+#include <wirepeek/export/json_writer.h>
+#include <wirepeek/export/pcap_writer.h>
 #include <wirepeek/protocol/protocol_handler.h>
 #include <wirepeek/request.h>
 #include <wirepeek/tui/app.h>
+#include <wirepeek/version.h>
 
 #include <CLI/CLI.hpp>
 #include <atomic>
@@ -42,10 +46,39 @@ void PrintTimestamp(wirepeek::Timestamp ts) {
 
 /// Run headless mode (tcpdump-like output).
 int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool no_reassemble,
-                int count) {
+                int count, const std::string& export_format, const std::string& output_file) {
+  // Set up exporters if requested.
+  std::unique_ptr<wirepeek::exporter::PcapWriter> pcap_writer;
+  std::unique_ptr<wirepeek::exporter::JsonWriter> json_writer;
+  std::shared_ptr<wirepeek::exporter::HarWriter> har_writer;
+
+  if (!export_format.empty()) {
+    std::string out = output_file.empty() ? "-" : output_file;
+    if (export_format == "pcap") {
+      if (out == "-") {
+        fmt::print(stderr, "Error: pcap export requires -o <file>\n");
+        return 1;
+      }
+      pcap_writer = std::make_unique<wirepeek::exporter::PcapWriter>(out);
+    } else if (export_format == "json") {
+      json_writer = std::make_unique<wirepeek::exporter::JsonWriter>(out);
+    } else if (export_format == "har") {
+      if (out == "-") {
+        fmt::print(stderr, "Error: har export requires -o <file>\n");
+        return 1;
+      }
+      har_writer = std::make_shared<wirepeek::exporter::HarWriter>();
+    } else {
+      fmt::print(stderr, "Error: unknown export format '{}'. Use: pcap, har, json\n",
+                 export_format);
+      return 1;
+    }
+  }
+
   // Set up protocol handler.
   auto protocol_handler = std::make_unique<wirepeek::protocol::ProtocolHandler>(
-      [](const wirepeek::ConnectionKey& /*key*/, const wirepeek::HttpTransaction& txn) {
+      [&har_writer, &json_writer](const wirepeek::ConnectionKey& /*key*/,
+                                  const wirepeek::HttpTransaction& txn) {
         if (txn.complete) {
           auto latency_ms =
               std::chrono::duration_cast<std::chrono::milliseconds>(txn.latency).count();
@@ -56,6 +89,11 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
           fmt::print("{} {} {} -> (no response)\n", txn.request.method, txn.request.url,
                      txn.request.version);
         }
+        // Export hooks.
+        if (har_writer)
+          har_writer->AddTransaction(txn);
+        if (json_writer)
+          json_writer->WriteHttpTransaction(txn);
       },
       [](const wirepeek::ConnectionKey& /*key*/, wirepeek::StreamDirection dir,
          std::span<const uint8_t> data) {
@@ -89,6 +127,12 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
     PrintTimestamp(pkt.timestamp);
     fmt::print("  {}\n", summary);
 
+    // Export hooks.
+    if (pcap_writer)
+      pcap_writer->WritePacket(pkt);
+    if (json_writer && !har_writer)
+      json_writer->WritePacket(pkt, dissected);
+
     if (reassembler) {
       reassembler->ProcessPacket(dissected, pkt.timestamp);
     }
@@ -104,6 +148,20 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
         std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::system_clock::now());
     reassembler->FlushExpired(now);
     fmt::print(stderr, "{} active TCP streams at exit\n", reassembler->StreamCount());
+  }
+
+  // Finalize exports.
+  if (har_writer && !output_file.empty()) {
+    har_writer->WriteToFile(output_file);
+    fmt::print(stderr, "Wrote {} HTTP transactions to {}\n", har_writer->TransactionCount(),
+               output_file);
+  }
+  if (pcap_writer) {
+    fmt::print(stderr, "Wrote {} packets to {}\n", pcap_writer->PacketCount(), output_file);
+  }
+  if (json_writer) {
+    fmt::print(stderr, "Wrote {} lines to {}\n", json_writer->LineCount(),
+               output_file.empty() ? "stdout" : output_file);
   }
 
   auto stats = source->Stats();
@@ -128,6 +186,8 @@ int main(int argc, char* argv[]) {
   int count = 0;
   bool verbose = false;
   bool no_reassemble = false;
+  std::string export_format;
+  std::string output_file;
 
   app.add_option("-i,--interface", interface, "Network interface to capture on");
   app.add_option("-f,--filter", bpf_filter, "BPF filter expression");
@@ -136,6 +196,8 @@ int main(int argc, char* argv[]) {
   app.add_option("-c,--count", count, "Number of packets to capture (0=unlimited)");
   app.add_flag("-v,--verbose", verbose, "Enable verbose logging");
   app.add_flag("--no-reassemble", no_reassemble, "Disable TCP stream reassembly");
+  app.add_option("--export", export_format, "Export format: pcap, har, json");
+  app.add_option("-o,--output", output_file, "Output file path for export");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -166,8 +228,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (headless) {
-    return RunHeadless(std::move(source), no_reassemble, count);
+  if (headless || !export_format.empty()) {
+    return RunHeadless(std::move(source), no_reassemble, count, export_format, output_file);
   }
 
   // TUI mode.

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(wirepeek
-  VERSION 0.1.0
+  VERSION 0.7.0
   LANGUAGES CXX
   DESCRIPTION "High-performance network packet analyzer with modern TUI"
 )
@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Generate version header from CMake project version.
+configure_file(
+  ${CMAKE_SOURCE_DIR}/include/wirepeek/version.h.in
+  ${CMAKE_BINARY_DIR}/generated/wirepeek/version.h
+  @ONLY
+)
 
 # Compiler warnings
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-16
+
+### Added
+
+- **pcap export** (`PcapWriter`): Write captured packets to standard .pcap format (compatible with Wireshark/tcpdump).
+- **HAR export** (`HarWriter`): Export HTTP transactions as HAR 1.2 JSON (compatible with browser DevTools, Postman, Charles).
+- **JSON export** (`JsonWriter`): Export packets and HTTP transactions as NDJSON (one JSON object per line, for scripting/CI/log aggregation).
+- **CLI export flags**: `--export pcap|har|json -o <file>` to export while capturing.
+- **7 new unit tests** for all three export formats. Total: 128 test cases.
+
 ## [0.6.0] - 2026-04-16
 
 ### Added
