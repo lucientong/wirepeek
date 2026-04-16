@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-16
+
+### Added
+
+- **DNS parser**: Parse DNS queries and responses from UDP payloads — domain name extraction with compression pointer support, A/AAAA/CNAME record answers, transaction ID matching, response code parsing.
+- **TLS handshake parser**: Extract metadata from ClientHello (SNI, ALPN protocols, TLS version) and ServerHello (cipher suite, version) without decryption.
+- **WebSocket detection**: Detect WebSocket upgrade from HTTP/1.1 headers (`Upgrade: websocket`), parse WebSocket frame headers (opcode, FIN, mask, payload length including extended formats).
+- **Extended data model** (`request.h`): `DnsQuery`, `DnsResponse`, `TlsHandshakeInfo`, `WsFrameInfo` structs with helper name functions (`DnsTypeName`, `TlsVersionName`, `WsOpcodeName`).
+- **21 new unit tests**: DNS (6), TLS (6), WebSocket (9). Total: 121 test cases.
+
 ## [0.5.0] - 2026-04-16
 
 ### Added

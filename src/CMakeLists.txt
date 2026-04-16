@@ -9,6 +9,9 @@ add_library(wirepeek_lib STATIC
   dissector/tcp_reassembler.cpp
   protocol/detector.cpp
   protocol/http1.cpp
+  protocol/dns.cpp
+  protocol/tls.cpp
+  protocol/websocket.cpp
   protocol/protocol_handler.cpp
   analyzer/tdigest.cpp
   analyzer/statistics.cpp

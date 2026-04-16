@@ -11,6 +11,9 @@ add_executable(wirepeek_tests
   unit/test_http1.cpp
   unit/test_tdigest.cpp
   unit/test_statistics.cpp
+  unit/test_dns.cpp
+  unit/test_tls.cpp
+  unit/test_websocket.cpp
 )
 
 target_link_libraries(wirepeek_tests PRIVATE

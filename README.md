@@ -149,7 +149,7 @@ See [Architecture Documentation](docs/en/architecture.md) for detailed design.
 | 3 | HTTP/1.1 parsing + protocol detection | ✅ Done |
 | 4 | TUI (FTXUI) | ✅ Done |
 | 5 | Latency analysis + statistics | ✅ Done |
-| 6 | HTTP/2, gRPC, DNS, TLS, WebSocket | ⬜ Planned |
+| 6 | HTTP/2, gRPC, DNS, TLS, WebSocket | ✅ Done |
 | 7 | Export (pcap/HAR/JSON) | ⬜ Planned |
 | 8 | TUI polish + filters + charts | ⬜ Planned |
 
