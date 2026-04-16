@@ -10,6 +10,7 @@ add_library(wirepeek_lib STATIC
   protocol/detector.cpp
   protocol/http1.cpp
   protocol/protocol_handler.cpp
+  tui/app.cpp
   capture/pcap_source.cpp
   capture/file_source.cpp
 )
@@ -23,6 +24,9 @@ target_link_libraries(wirepeek_lib PUBLIC
   spdlog::spdlog
   Pcap::Pcap
   xxhash
+  ftxui::screen
+  ftxui::dom
+  ftxui::component
 )
 
 # ── wirepeek: main executable ─────────────────────────────────────────────────

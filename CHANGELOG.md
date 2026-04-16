@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-16
+
+### Added
+
+- **Terminal UI** (`TuiApp`): Modern interactive terminal interface built with FTXUI v5.0.0.
+  - Stats bar: live packet count, TCP stream count, HTTP transaction count.
+  - Request table: scrollable list with Time, Protocol, Method, URL, Status, Latency columns.
+  - Detail panel: shows request/response headers for selected entry (toggle with `d`).
+  - Color-coded: protocol names (HTTP=cyan, TLS=yellow, TCP=blue, UDP=magenta), status codes (2xx=green, 4xx=red, 5xx=dark red).
+  - Keyboard navigation: `↑↓` scroll, `q` quit, `d` toggle detail panel.
+  - Multi-threaded: capture runs in background thread, UI renders on main thread with 100ms refresh.
+  - Thread-safe `UiState` with mutex-protected circular buffer (max 10,000 entries).
+- **Default mode is now TUI** — `--headless` flag for tcpdump-like output (previous behavior).
+
 ## [0.3.0] - 2026-04-16
 
 ### Added
