@@ -145,7 +145,7 @@ sudo wirepeek -i eth0 --export har -o output.har
 |------|------|------|
 | 1 | 抓包引擎 + 基础协议解析 (Ethernet/IP/TCP/UDP) | ✅ 已完成 |
 | 2 | TCP 流重组 | ✅ 已完成 |
-| 3 | HTTP/1.1 解析 + 协议自动检测 | ⬜ 计划中 |
+| 3 | HTTP/1.1 解析 + 协议自动检测 | ✅ 已完成 |
 | 4 | 终端界面 (FTXUI) | ⬜ 计划中 |
 | 5 | 延迟分析 + 流量统计 | ⬜ 计划中 |
 | 6 | HTTP/2、gRPC、DNS、TLS、WebSocket | ⬜ 计划中 |

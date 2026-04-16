@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-16
+
+### Added
+
+- **Protocol detection** (`DetectProtocol`): Heuristic-based detection from first stream bytes — HTTP/1.1 (all methods + response), TLS (handshake record), HTTP/2 (connection preface).
+- **HTTP/1.1 parser** (`Http1Parser`): Incremental request/response parser with Content-Length body handling, header parsing, request-response pairing, and latency calculation.
+- **Protocol handler** (`ProtocolHandler`): Routes reassembled stream data to appropriate parsers — detects protocol on first data event, creates per-stream parser instances.
+- **Application-layer data model** (`request.h`): `AppProtocol` enum, `HttpRequest`, `HttpResponse`, `HttpTransaction` structs.
+- **CLI HTTP output**: Displays `GET /path HTTP/1.1 → 200 OK (43ms) [1256 bytes]` for HTTP traffic, falls back to raw byte counts for non-HTTP.
+- **23 new unit tests**: Protocol detection (14 tests), HTTP/1.1 parser (9 tests).
+
 ## [0.2.0] - 2026-04-15
 
 ### Added

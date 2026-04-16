@@ -8,6 +8,8 @@
 #include <wirepeek/capture/pcap_source.h>
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/tcp_reassembler.h>
+#include <wirepeek/protocol/protocol_handler.h>
+#include <wirepeek/request.h>
 
 #include <CLI/CLI.hpp>
 #include <atomic>
@@ -22,7 +24,6 @@
 
 namespace {
 
-// Global flag for signal handling.
 std::atomic<bool> g_running{true};
 
 void SignalHandler(int /*signum*/) {
@@ -47,7 +48,7 @@ int main(int argc, char* argv[]) {
   std::string bpf_filter;
   std::string read_file;
   bool headless = false;
-  int count = 0;  // 0 = unlimited
+  int count = 0;
   bool verbose = false;
   bool no_reassemble = false;
 
@@ -61,19 +62,15 @@ int main(int argc, char* argv[]) {
 
   CLI11_PARSE(app, argc, argv);
 
-  // Configure logging.
   spdlog::set_level(verbose ? spdlog::level::debug : spdlog::level::warn);
 
-  // Validate arguments.
   if (interface.empty() && read_file.empty()) {
     fmt::print(stderr, "Error: specify either -i <interface> or --read <file>\n");
     return 1;
   }
 
-  // For now, always run in headless mode (TUI comes in Phase 4).
   headless = true;
 
-  // Set up signal handling.
   std::signal(SIGINT, SignalHandler);
   std::signal(SIGTERM, SignalHandler);
 
@@ -94,25 +91,39 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  // Set up protocol handler for HTTP transaction display.
+  auto protocol_handler = std::make_unique<wirepeek::protocol::ProtocolHandler>(
+      // HTTP transaction callback.
+      [](const wirepeek::ConnectionKey& /*key*/, const wirepeek::HttpTransaction& txn) {
+        if (txn.complete) {
+          auto latency_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(txn.latency).count();
+          fmt::print("{} {} {} -> {} {} ({}ms) [{} bytes]\n", txn.request.method, txn.request.url,
+                     txn.request.version, txn.response.status_code, txn.response.reason, latency_ms,
+                     txn.response.body_size);
+        } else {
+          fmt::print("{} {} {} -> (no response)\n", txn.request.method, txn.request.url,
+                     txn.request.version);
+        }
+      },
+      // Raw data fallback callback.
+      [](const wirepeek::ConnectionKey& /*key*/, wirepeek::StreamDirection dir,
+         std::span<const uint8_t> data) {
+        const char* dir_str = (dir == wirepeek::StreamDirection::kClientToServer)
+                                  ? "client->server"
+                                  : "server->client";
+        fmt::print("[stream data] {} bytes ({})\n", data.size(), dir_str);
+      });
+
   // Set up TCP reassembler.
   std::unique_ptr<wirepeek::dissector::TcpReassembler> reassembler;
   if (!no_reassemble) {
     reassembler = std::make_unique<wirepeek::dissector::TcpReassembler>(
-        [](const wirepeek::dissector::StreamEvent& event) {
-          const char* dir_str = (event.direction == wirepeek::StreamDirection::kClientToServer)
-                                    ? "client->server"
-                                    : "server->client";
-          switch (event.type) {
-            case wirepeek::dissector::StreamEventType::kOpen:
-              fmt::print("[stream open] {}\n", dir_str);
-              break;
-            case wirepeek::dissector::StreamEventType::kData:
-              fmt::print("[stream data] {} bytes ({})\n", event.data.size(), dir_str);
-              break;
-            case wirepeek::dissector::StreamEventType::kClose:
-              fmt::print("[stream close]\n");
-              break;
-          }
+        [&protocol_handler](const wirepeek::dissector::StreamEvent& event) {
+          // Use the event's timestamp or a default.
+          auto now = std::chrono::time_point_cast<std::chrono::microseconds>(
+              std::chrono::system_clock::now());
+          protocol_handler->OnStreamEvent(event, now);
         });
   }
 
@@ -131,7 +142,6 @@ int main(int argc, char* argv[]) {
     PrintTimestamp(pkt.timestamp);
     fmt::print("  {}\n", summary);
 
-    // Feed to reassembler.
     if (reassembler) {
       reassembler->ProcessPacket(dissected, pkt.timestamp);
     }
@@ -142,7 +152,6 @@ int main(int argc, char* argv[]) {
     }
   });
 
-  // Flush remaining streams.
   if (reassembler) {
     auto now =
         std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::system_clock::now());
@@ -150,7 +159,6 @@ int main(int argc, char* argv[]) {
     fmt::print(stderr, "{} active TCP streams at exit\n", reassembler->StreamCount());
   }
 
-  // Print statistics.
   auto stats = source->Stats();
   fmt::print(stderr, "\n--- wirepeek capture statistics ---\n");
   fmt::print(stderr, "{} packets captured\n", stats.packets_received);

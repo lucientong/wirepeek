@@ -146,7 +146,7 @@ See [Architecture Documentation](docs/en/architecture.md) for detailed design.
 |-------|-------------|--------|
 | 1 | Capture + basic dissectors (Ethernet/IP/TCP/UDP) | ✅ Done |
 | 2 | TCP stream reassembly | ✅ Done |
-| 3 | HTTP/1.1 parsing + protocol detection | ⬜ Planned |
+| 3 | HTTP/1.1 parsing + protocol detection | ✅ Done |
 | 4 | TUI (FTXUI) | ⬜ Planned |
 | 5 | Latency analysis + statistics | ⬜ Planned |
 | 6 | HTTP/2, gRPC, DNS, TLS, WebSocket | ⬜ Planned |
