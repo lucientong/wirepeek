@@ -35,6 +35,13 @@ struct TuiStats {
   uint64_t stream_count = 0;
   uint64_t http_txn_count = 0;
   uint64_t total_bytes = 0;
+  // Latency percentiles (microseconds).
+  int64_t p50_latency_us = 0;
+  int64_t p95_latency_us = 0;
+  int64_t p99_latency_us = 0;
+  // Throughput.
+  double throughput_mbps = 0.0;
+  double qps = 0.0;
 };
 
 /// Thread-safe shared state. Capture thread writes, UI thread reads.
@@ -78,6 +85,15 @@ class UiState {
   void IncrementHttpTransactions() {
     std::lock_guard lock(mutex_);
     ++stats_.http_txn_count;
+  }
+
+  void UpdateAnalyzerStats(int64_t p50, int64_t p95, int64_t p99, double mbps, double qps) {
+    std::lock_guard lock(mutex_);
+    stats_.p50_latency_us = p50;
+    stats_.p95_latency_us = p95;
+    stats_.p99_latency_us = p99;
+    stats_.throughput_mbps = mbps;
+    stats_.qps = qps;
   }
 
   TuiStats GetStats() const {

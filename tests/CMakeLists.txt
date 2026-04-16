@@ -9,6 +9,8 @@ add_executable(wirepeek_tests
   unit/test_tcp_reassembler.cpp
   unit/test_detector.cpp
   unit/test_http1.cpp
+  unit/test_tdigest.cpp
+  unit/test_statistics.cpp
 )
 
 target_link_libraries(wirepeek_tests PRIVATE

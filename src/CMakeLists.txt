@@ -10,6 +10,8 @@ add_library(wirepeek_lib STATIC
   protocol/detector.cpp
   protocol/http1.cpp
   protocol/protocol_handler.cpp
+  analyzer/tdigest.cpp
+  analyzer/statistics.cpp
   tui/app.cpp
   capture/pcap_source.cpp
   capture/file_source.cpp

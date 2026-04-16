@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-16
+
+### Added
+
+- **T-Digest percentile engine** (`TDigest`): Streaming percentile estimation for P50/P95/P99 latency with ~1% accuracy and O(1) amortized updates.
+- **Statistics collector** (`Statistics`): Thread-safe aggregate metrics — latency percentiles, average latency, real-time throughput (Mbps, sliding 1s window), QPS, active stream count.
+- **Enhanced TUI stats bar**: Now displays P95 latency and throughput alongside packet/stream/HTTP counts.
+- **14 new unit tests**: T-Digest (7 tests), Statistics (7 tests). Total: 100 test cases.
+
 ## [0.4.0] - 2026-04-16
 
 ### Added

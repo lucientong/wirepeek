@@ -1,6 +1,7 @@
 // Copyright 2026 lucientong
 // SPDX-License-Identifier: Apache-2.0
 
+#include <wirepeek/analyzer/statistics.h>
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/tcp_reassembler.h>
 #include <wirepeek/protocol/protocol_handler.h>
@@ -67,11 +68,15 @@ TuiApp::~TuiApp() {
 }
 
 void TuiApp::CaptureLoop(capture::CaptureSource& source) {
+  // Statistics collector.
+  auto stats = std::make_shared<analyzer::Statistics>();
+
   // Set up protocol handler.
   auto protocol_handler = std::make_unique<protocol::ProtocolHandler>(
       // HTTP transaction callback.
-      [this](const ConnectionKey& /*key*/, const HttpTransaction& txn) {
+      [this, stats](const ConnectionKey& /*key*/, const HttpTransaction& txn) {
         state_->IncrementHttpTransactions();
+        stats->RecordHttpTransaction(txn);
 
         TuiEntry entry;
         entry.timestamp = txn.request.timestamp;
@@ -136,6 +141,7 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
     }
 
     state_->IncrementPackets(pkt.data.size());
+    stats->RecordPacket(pkt.data.size(), pkt.timestamp);
 
     auto dissected = dissector::Dissect(pkt);
 
@@ -159,6 +165,11 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
       }
       state_->AddEntry(std::move(entry));
     }
+
+    // Periodically push analyzer stats to UI state.
+    auto snap = stats->Snapshot();
+    state_->UpdateAnalyzerStats(snap.p50_latency_us, snap.p95_latency_us, snap.p99_latency_us,
+                                snap.throughput_mbps, snap.qps);
   });
 }
 
@@ -188,13 +199,24 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
     using namespace ftxui;
 
     // ── Stats bar ──
+    auto p95_str = cached_stats.p95_latency_us > 0
+                       ? fmt::format("{}ms", cached_stats.p95_latency_us / 1000)
+                       : "-";
+    auto tp_str = cached_stats.throughput_mbps > 0.01
+                      ? fmt::format("{:.1f}Mbps", cached_stats.throughput_mbps)
+                      : "-";
+
     auto stats_bar = hbox({
-                         text(" Packets: ") | bold,
+                         text(" Pkts: ") | bold,
                          text(fmt::format("{}", cached_stats.packet_count)) | color(Color::Cyan),
                          text("  Streams: ") | bold,
                          text(fmt::format("{}", cached_stats.stream_count)) | color(Color::Yellow),
-                         text("  HTTP Txns: ") | bold,
+                         text("  HTTP: ") | bold,
                          text(fmt::format("{}", cached_stats.http_txn_count)) | color(Color::Green),
+                         text("  P95: ") | bold,
+                         text(p95_str) | color(Color::Magenta),
+                         text("  ") | bold,
+                         text(tp_str) | color(Color::CyanLight),
                          filler(),
                          text(" wirepeek ") | bold | color(Color::Cyan),
                      }) |
