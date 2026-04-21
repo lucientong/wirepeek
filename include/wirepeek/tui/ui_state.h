@@ -8,6 +8,8 @@
 
 #include <wirepeek/packet.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -42,6 +44,8 @@ struct TuiStats {
   // Throughput.
   double throughput_mbps = 0.0;
   double qps = 0.0;
+  // Sparkline: last N seconds of packet counts for the traffic chart.
+  std::vector<int> pps_history;  ///< Packets-per-second over the last 60 seconds.
 };
 
 /// Thread-safe shared state. Capture thread writes, UI thread reads.
@@ -96,15 +100,53 @@ class UiState {
     stats_.qps = qps;
   }
 
+  /// Push a packets-per-second sample for the sparkline chart.
+  void PushPpsSample(int pps) {
+    std::lock_guard lock(mutex_);
+    pps_history_.push_back(pps);
+    if (pps_history_.size() > kSparklineLen) {
+      pps_history_.pop_front();
+    }
+  }
+
   TuiStats GetStats() const {
     std::lock_guard lock(mutex_);
-    return stats_;
+    auto s = stats_;
+    s.pps_history = {pps_history_.begin(), pps_history_.end()};
+    return s;
+  }
+
+  /// Get entries matching a filter string (case-insensitive substring match on
+  /// protocol/method/url).
+  std::vector<TuiEntry> GetFilteredEntries(const std::string& filter) const {
+    std::lock_guard lock(mutex_);
+    if (filter.empty())
+      return {entries_.begin(), entries_.end()};
+    std::vector<TuiEntry> result;
+    for (const auto& e : entries_) {
+      if (ContainsCI(e.protocol, filter) || ContainsCI(e.method, filter) ||
+          ContainsCI(e.url, filter)) {
+        result.push_back(e);
+      }
+    }
+    return result;
   }
 
  private:
+  static constexpr size_t kSparklineLen = 60;
+
+  static bool ContainsCI(const std::string& haystack, const std::string& needle) {
+    if (needle.empty())
+      return true;
+    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                          [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+    return it != haystack.end();
+  }
+
   mutable std::mutex mutex_;
   std::deque<TuiEntry> entries_;
   TuiStats stats_;
+  std::deque<int> pps_history_;
 };
 
 }  // namespace wirepeek::tui

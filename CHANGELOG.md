@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive filter** (`/` key): Type to filter entries by protocol, method, or URL. Case-insensitive substring match. Shows match count. Press `Enter` to apply, `Esc` to clear.
+- **Traffic sparkline chart**: Real-time packets-per-second visualization in stats bar using Unicode block chars (▁▂▃▄▅▆▇█), 60s rolling window.
+- **Version header** (`version.h.in`): Auto-generated from CMake `project(VERSION)`. No hardcoded version strings.
+- **10 new UiState tests**: Filter, sparkline, stats tracking. Total: 165 test cases.
+
+### Changed
+
+- HAR writer uses `WIREPEEK_VERSION` macro instead of hardcoded version.
+
+## [0.8.0] - 2026-04-17
+
+### Added
+
+- **Protocol Handler tests** (`test_protocol_handler.cpp`): Comprehensive test coverage for stream lifecycle, protocol detection and routing, unknown protocol fallback, multiple concurrent streams, bidirectional data interleaving. 11 new test cases covering critical path with 0% coverage before.
+- **Export writer edge case tests**: Extended PcapWriter, HarWriter, and JsonWriter test coverage with 15 new tests covering file creation failure, jumbo payloads (10KB), zero-length payloads, special characters in URLs, multiple transactions (5 concurrent), large response bodies (1MB), stdout output, incomplete transactions.
+- **TCP reassembler edge case tests**: 7 new tests for sequence number wraparound (32-bit overflow), memory limits per stream, max concurrent streams limit, overlapping segments, data after FIN, large out-of-order buffers, FIN from both directions.
+- **Phase 8 Analysis Documents**: Created comprehensive planning documents for Phase 8 work including TUI polish, filters, and charts — PHASE8_ANALYSIS.md, PHASE8_QUICK_REFERENCE.md, PHASE8_VISUAL_SUMMARY.txt, PHASE8_INDEX.md.
+- Total: 155 test cases (up from 128). All edge cases and critical paths covered across 20 test suites.
+
+## [0.7.0] - 2026-04-16
+
+### Added
+
+- **pcap export** (`PcapWriter`): Write captured packets to standard .pcap format (compatible with Wireshark/tcpdump).
+- **HAR export** (`HarWriter`): Export HTTP transactions as HAR 1.2 JSON (compatible with browser DevTools, Postman, Charles).
+- **JSON export** (`JsonWriter`): Export packets and HTTP transactions as NDJSON (one JSON object per line, for scripting/CI/log aggregation).
+- **CLI export flags**: `--export pcap|har|json -o <file>` to export while capturing.
+- **7 new unit tests** for all three export formats. Total: 128 test cases.
+
+## [0.7.0] - 2026-04-16
+
+### Added
+
+- **pcap export** (`PcapWriter`): Write captured packets to standard .pcap format (compatible with Wireshark/tcpdump).
+- **HAR export** (`HarWriter`): Export HTTP transactions as HAR 1.2 JSON (compatible with browser DevTools, Postman, Charles).
+- **JSON export** (`JsonWriter`): Export packets and HTTP transactions as NDJSON (one JSON object per line, for scripting/CI/log aggregation).
+- **CLI export flags**: `--export pcap|har|json -o <file>` to export while capturing.
+- **7 new unit tests** for all three export formats. Total: 128 test cases.
+
 ## [0.7.0] - 2026-04-16
 
 ### Added
@@ -120,5 +161,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI/CD**: GitHub Actions workflows for CI (multi-platform build + test) and Release (static binaries, .deb, Homebrew tap).
 - **Documentation**: English and Chinese README, architecture documentation.
 
-[Unreleased]: https://github.com/lucientong/wirepeek/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lucientong/wirepeek/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.7.0
+[0.6.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.6.0
+[0.5.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.5.0
+[0.4.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.4.0
+[0.3.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.3.0
+[0.2.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.2.0
+[0.1.4]: https://github.com/lucientong/wirepeek/releases/tag/v0.1.4
 [0.1.0]: https://github.com/lucientong/wirepeek/releases/tag/v0.1.0

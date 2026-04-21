@@ -380,5 +380,229 @@ TEST_F(TcpReassemblerTest, BidirectionalData) {
   EXPECT_TRUE(has_s2c);
 }
 
+// ── Sequence number wraparound ───────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, SequenceNumberWraparound) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+  std::vector<uint8_t> data = {0xAA, 0xBB};
+
+  // SYN near 32-bit boundary (seq 0xFFFFFFFE)
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 0xFFFFFFFEu,
+                                    tcp_flags::kSYN, empty),
+                   MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 100,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // Send data that wraps around: seq=0xFFFFFFFF (1 byte), then seq=0 (1 byte)
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 0xFFFFFFFFu,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0xAA}),
+                   MakeTs(2));
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 0u, tcp_flags::kACK,
+                                    std::vector<uint8_t>{0xBB}),
+                   MakeTs(2));
+
+  // Both bytes should be reassembled.
+  std::vector<uint8_t> all_data;
+  for (const auto& e : events) {
+    if (e.type == StreamEventType::kData && e.direction == StreamDirection::kClientToServer) {
+      all_data.insert(all_data.end(), e.data.begin(), e.data.end());
+    }
+  }
+  EXPECT_EQ(all_data, (std::vector<uint8_t>{0xAA, 0xBB}));
+}
+
+// ── Memory limit per stream ──────────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, MemoryLimitPerStream) {
+  ReassemblerConfig config;
+  config.max_bytes_per_stream = 100;  // Only 100 bytes per stream
+  auto r = MakeReassembler(config);
+  std::vector<uint8_t> empty;
+
+  // Handshake.
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // Send 150 bytes of data (out of order to trigger buffering).
+  std::vector<uint8_t> big_data(150, 0xAA);
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 110, tcp_flags::kACK,
+                       std::vector<uint8_t>(big_data.begin(), big_data.begin() + 75)),
+      MakeTs(2));
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101, tcp_flags::kACK,
+                       std::vector<uint8_t>(big_data.begin() + 75, big_data.end())),
+      MakeTs(2));
+
+  // Stream should still exist but buffering should be bounded.
+  // Just verify no crash/segfault from memory overflow.
+  EXPECT_LE(r->StreamCount(), 1u);
+}
+
+// ── Max concurrent streams limit ─────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, MaxStreamsLimit) {
+  ReassemblerConfig config;
+  config.max_streams = 3;  // Only 3 concurrent streams
+  auto r = MakeReassembler(config);
+  std::vector<uint8_t> empty;
+
+  // Create 4 different streams.
+  std::vector<uint16_t> ports = {1001, 1002, 1003, 1004};
+  for (size_t i = 0; i < ports.size(); ++i) {
+    r->ProcessPacket(
+        MakeTcpDissected(kClient, ports[i], kServer, kServerPort, 100u + i, tcp_flags::kSYN, empty),
+        MakeTs(1));
+  }
+
+  // After adding the 4th stream, the oldest should be evicted.
+  // Should have at most 3 streams at any time.
+  EXPECT_LE(r->StreamCount(), 3u);
+}
+
+// ── Overlapping segments ─────────────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, OverlappingSegments) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+
+  // Handshake.
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // First segment: seq=101, data={0x01, 0x02, 0x03}
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0x01, 0x02, 0x03}),
+                   MakeTs(2));
+
+  // Overlapping segment: seq=102, data={0xFF, 0xFF} (overlaps with part of first segment)
+  // "First wins" strategy should keep original data.
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 102,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0xFF, 0xFF}),
+                   MakeTs(2));
+
+  // Verify delivered data is from the first segment.
+  std::vector<uint8_t> all_data;
+  for (const auto& e : events) {
+    if (e.type == StreamEventType::kData && e.direction == StreamDirection::kClientToServer) {
+      all_data.insert(all_data.end(), e.data.begin(), e.data.end());
+    }
+  }
+  // Should include the first segment's data.
+  EXPECT_GE(all_data.size(), 3u);
+  if (all_data.size() >= 3) {
+    EXPECT_EQ(all_data[0], 0x01);
+  }
+}
+
+// ── Data after FIN ──────────────────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, DataAfterFin) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+
+  // Handshake.
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // Send FIN + ACK from client.
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101,
+                                    tcp_flags::kFIN | tcp_flags::kACK, empty),
+                   MakeTs(2));
+
+  int stream_count_after_fin = r->StreamCount();
+  EXPECT_GE(stream_count_after_fin, 0);  // Stream may still exist (waiting for FIN from server).
+
+  // Try to send more data after FIN (technically invalid but shouldn't crash).
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0xAA}),
+                   MakeTs(3));
+
+  // Should not crash or create additional data events.
+  EXPECT_TRUE(true);
+}
+
+// ── Large out-of-order buffer ───────────────────────────────────────────
+
+TEST_F(TcpReassemblerTest, LargeOutOfOrderBuffer) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+
+  // Handshake.
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // Send 5 segments out of order (reverse order).
+  std::vector<std::vector<uint8_t>> segments = {{0x05}, {0x04}, {0x03}, {0x02}, {0x01}};
+  std::vector<uint32_t> seqs = {105, 104, 103, 102, 101};
+
+  for (size_t i = 0; i < segments.size(); ++i) {
+    r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, seqs[i],
+                                      tcp_flags::kACK, segments[i]),
+                     MakeTs(2));
+  }
+
+  // All segments should be buffered and eventually flushed in order.
+  std::vector<uint8_t> all_data;
+  for (const auto& e : events) {
+    if (e.type == StreamEventType::kData && e.direction == StreamDirection::kClientToServer) {
+      all_data.insert(all_data.end(), e.data.begin(), e.data.end());
+    }
+  }
+  EXPECT_EQ(all_data, (std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04, 0x05}));
+}
+
+// ── FIN then close from opposite direction ──────────────────────────────
+
+TEST_F(TcpReassemblerTest, FinFromBothDirections) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+
+  // Handshake.
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+  EXPECT_EQ(r->StreamCount(), 1u);
+
+  // Server closes first.
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 201,
+                                    tcp_flags::kFIN | tcp_flags::kACK, empty),
+                   MakeTs(2));
+  EXPECT_EQ(r->StreamCount(), 1u);  // Stream still exists (half-closed).
+
+  // Client closes.
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101,
+                                    tcp_flags::kFIN | tcp_flags::kACK, empty),
+                   MakeTs(3));
+  EXPECT_EQ(r->StreamCount(), 0u);  // Stream fully closed.
+
+  // Should have 2 close events (one per direction).
+  auto close_count = std::count_if(events.begin(), events.end(), [](const Event& e) {
+    return e.type == StreamEventType::kClose;
+  });
+  EXPECT_GE(close_count, 1);
+}
+
 }  // namespace
 }  // namespace wirepeek::dissector

@@ -1,281 +1,234 @@
-# Wirepeek Architecture
+# Wirepeek — Architecture & Design
 
 > [中文版](../zh/architecture.md)
 
-## Overview
+This document explains **how wirepeek is built** — the implementation strategies, key algorithms, and design trade-offs. It's intended for contributors and anyone interested in the internals.
 
-Wirepeek is a single-binary, high-performance network packet analyzer designed for the terminal. It captures packets from network interfaces or pcap files, parses them through a layered dissection pipeline, and presents the results through a modern TUI or headless text output.
+## 1. System Overview
 
-```
-                              ┌───────────────────────┐
-                              │    CLI / TUI Layer     │
-                              │  (CLI11 + FTXUI)       │
-                              └───────────┬───────────┘
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    │                     │                     │
-              ┌─────▼─────┐        ┌──────▼──────┐      ┌──────▼──────┐
-              │  Export    │        │  Analyzer   │      │  Protocol   │
-              │ pcap/HAR/ │        │  latency/   │      │  HTTP/gRPC/ │
-              │ JSON       │        │  statistics │      │  DNS/TLS    │
-              └────────────┘        └──────┬──────┘      └──────┬──────┘
-                                          │                     │
-                                   ┌──────▼─────────────────────▼──────┐
-                                   │         Dissector Layer            │
-                                   │  Ethernet → IP → TCP / UDP        │
-                                   │  (+ TCP stream reassembly)         │
-                                   └──────────────┬────────────────────┘
-                                                  │
-                                   ┌──────────────▼────────────────────┐
-                                   │         Capture Layer              │
-                                   │  libpcap (live) / file reader      │
-                                   └───────────────────────────────────┘
-```
-
-## Module Breakdown
-
-### 1. Capture Layer (`src/capture/`)
-
-Responsible for acquiring raw packet data from the operating system.
-
-| Component | File | Description |
-|-----------|------|-------------|
-| `CaptureSource` | `capture.h` | Abstract base class defining the capture interface |
-| `PcapSource` | `pcap_source.h/.cpp` | Live capture via libpcap (`pcap_create` → `pcap_activate` → `pcap_loop`) |
-| `FileSource` | `file_source.h/.cpp` | Offline reading from `.pcap`/`.pcapng` files |
-
-**Key design decisions:**
-- **Callback-based delivery**: `Start(PacketCallback)` blocks and invokes the callback for each packet. This avoids ring buffer management in the capture layer.
-- **Custom deleter**: `pcap_t*` is wrapped in `std::unique_ptr` with a custom deleter to ensure cleanup.
-- **Atomic stop flag**: `Stop()` sets `std::atomic<bool>` and calls `pcap_breakloop()`, safe to call from signal handlers.
-
-### 2. Core Types (`include/wirepeek/`)
-
-Foundation types shared across all layers.
-
-| Type | File | Description |
-|------|------|-------------|
-| `PacketView` | `packet.h` | Non-owning view into capture buffer (hot path) |
-| `OwnedPacket` | `packet.h` | Owning copy for async/cross-thread use |
-| `Timestamp` | `packet.h` | `std::chrono::time_point` with microsecond precision |
-| `DissectResult<T>` | `result.h` | `std::expected`-like error handling for dissectors |
-| `DissectError` | `result.h` | Error enum: `kTruncated`, `kInvalidHeader`, etc. |
-| `ConnectionKey` | `stream.h` | 5-tuple (IPs + ports + protocol) for flow identification |
-| `ReadU16Be/ReadU32Be` | `endian.h` | Network byte order reading helpers |
-
-**Zero-copy architecture:**
+Wirepeek is a pipeline: raw packets flow in from one end, and structured, human-readable protocol information comes out the other.
 
 ```
-┌──────────────────────────────────────────┐
-│          libpcap ring buffer             │
-│  ┌─────────────────────────────────┐     │
-│  │  ethernet  │  ip  │ tcp │ data  │     │
-│  └─────────────────────────────────┘     │
-│       ▲            ▲        ▲            │
-│       │            │        │            │
-│  PacketView   IpInfo    TcpInfo          │
-│  .data        .payload  .payload         │
-│  (span)       (span)    (span)           │
-└──────────────────────────────────────────┘
+Network / pcap file
+    │
+    ▼
+┌────────────┐  PacketView     ┌──────────────┐  StreamEvent
+│  Capture   │ ─────────────→  │  Dissect()   │ ──────────→
+│  (libpcap) │  (zero-copy)    │  + TCP Reasm  │  (in-order)
+└────────────┘                 └──────┬───────┘
+                                      │
+                    ┌─────────────────┼─────────────────┐
+                    ▼                 ▼                  ▼
+             ┌───────────┐    ┌────────────┐     ┌───────────┐
+             │ Protocol  │    │  Analyzer  │     │  Export   │
+             │ HTTP/DNS  │    │  T-Digest  │     │ pcap/HAR │
+             │ TLS/WS    │    │  Stats     │     │ JSON     │
+             └─────┬─────┘    └─────┬──────┘     └──────────┘
+                   │                │
+                   ▼                ▼
+             ┌──────────────────────────┐
+             │   TUI (FTXUI) / CLI      │
+             │  filter, sparkline,      │
+             │  detail panel            │
+             └──────────────────────────┘
 ```
 
-All `Info` structs hold `std::span<const uint8_t>` pointing into the original buffer — no copying during dissection.
+## 2. Data Flow in Detail
 
-### 3. Dissector Layer (`src/dissector/`)
+A single packet's journey:
 
-Parses network protocol headers in a bottom-up pipeline: L2 → L3 → L4.
+1. **libpcap** delivers a raw buffer via callback → wrapped in `PacketView` (non-owning `span`, zero allocation)
+2. **`Dissect()`** chains `ParseEthernet → ParseIp → ParseTcp/ParseUdp` — each returns an `Info` struct with a `.payload` span pointing into the original buffer
+3. **`TcpReassembler`** indexes by `ConnectionKey`, tracks sequence numbers, buffers out-of-order segments, emits `StreamEvent::kData` with in-order bytes
+4. **`ProtocolHandler`** calls `DetectProtocol()` on first data, creates a per-stream parser (e.g., `Http1Parser`), routes subsequent data
+5. **`Http1Parser`** incrementally parses request line → headers → body, pairs with response, calculates latency, emits `HttpTransaction`
+6. **`Statistics`** feeds latency into `TDigest` for P50/P95/P99, tracks throughput via sliding window
+7. **`UiState`** (mutex-protected) receives the entry, the TUI renders on next 100ms tick
 
-| Dissector | Input | Output | Key Logic |
-|-----------|-------|--------|-----------|
-| `ParseEthernet()` | Raw frame | `EthernetInfo` | MAC addresses, EtherType, 802.1Q VLAN |
-| `ParseIp()` | Ethernet payload | `IpInfo` | IPv4 (variable IHL) / IPv6 (fixed 40B), auto-detect |
-| `ParseTcp()` | IP payload | `TcpInfo` | Ports, seq/ack, flags, data offset |
-| `ParseUdp()` | IP payload | `UdpInfo` | Ports, length |
-| `Dissect()` | `PacketView` | `DissectedPacket` | Chains all parsers, stops at first unsupported layer |
+## 3. Design Decisions
 
-**Error handling strategy:**
+### 3.1 Zero-Copy Parsing
 
-Every dissector returns `DissectResult<T>` (an `expected`-like type). On error, the pipeline stops and returns partial results — you always get as much information as possible.
+**Decision:** Dissectors operate on `std::span<const uint8_t>` pointing into the pcap ring buffer. No per-packet memory allocation.
+
+**Why:** At 10Gbps (~1M packets/sec), even a 64-byte allocation per packet = 64MB/s of heap churn. By using spans, parsing is just pointer arithmetic. The trade-off: `PacketView` must not outlive the pcap buffer — that's why `OwnedPacket` exists for cross-thread handoff.
+
+**Where:** `include/wirepeek/packet.h` (`PacketView` vs `OwnedPacket`), all dissector `Info` structs (`.payload` is a span).
+
+### 3.2 Error Handling with DissectResult
+
+**Decision:** `DissectResult<T>` — a `std::expected`-like type (with fallback for pre-C++23 compilers).
+
+**Why:** Packet parsing fails often (truncated captures, corrupted data). Exceptions are too expensive on the hot path. Error codes lose type safety. `expected` gives zero-cost success path with typed errors. The `Dissect()` pipeline stops at the first failure but returns partial results — you always get as much info as possible.
+
+**Where:** `include/wirepeek/result.h`, every `Parse*()` function.
+
+### 3.3 TCP Reassembly with Ordered Map
+
+**Decision:** Out-of-order segments are stored in `std::map<uint32_t, vector<uint8_t>>` keyed by sequence number.
+
+**Why:** A contiguous ring buffer would be simpler but wastes memory for sparse arrivals. A map only stores what's actually arrived out of order. When the expected segment arrives, we scan the map for contiguous entries and flush them. Typical real-world out-of-order rate is <1%, so the map is usually empty.
+
+**Sequence wraparound:** `static_cast<int32_t>(a - b) < 0` correctly handles the full 32-bit sequence space.
+
+**Where:** `include/wirepeek/dissector/tcp_reassembler.h` (`HalfStream::out_of_order`), `FlushBuffered()`.
+
+### 3.4 Protocol Detection by Content, Not Port
+
+**Decision:** `DetectProtocol()` matches byte patterns in the first data chunk, ignoring port numbers entirely.
+
+**Why:** Modern services run HTTP on 8080, gRPC on 50051, TLS on any port. Port-based detection is unreliable. Content-based detection (HTTP starts with `GET `, TLS starts with `0x16 0x03`) is accurate regardless of port.
+
+**Where:** `src/protocol/detector.cpp`.
+
+### 3.5 T-Digest for Streaming Percentiles
+
+**Decision:** Use T-Digest (simplified) instead of keeping all values or sampling.
+
+**Why:** Keeping all latency values for exact percentiles uses O(n) memory. Reservoir sampling loses accuracy at the tails (P99). T-Digest maintains ~100 centroids with ~1% accuracy at extreme percentiles, O(1) amortized per insertion, O(1) query. Perfect for continuous monitoring.
+
+**Where:** `src/analyzer/tdigest.cpp`.
+
+### 3.6 Threading: Mutex Over Lock-Free
+
+**Decision:** Capture thread and UI thread communicate via `UiState` protected by `std::mutex`.
+
+**Why:** Lock-free SPSC queues are faster but add complexity. At our refresh rate (10 UI frames/sec) and entry rate (~1K entries/sec), mutex contention is negligible. The critical section is tiny: copy a struct into a deque or read a deque into a vector. If profiling shows contention, upgrade to lock-free — but measure first.
+
+**Where:** `include/wirepeek/tui/ui_state.h`.
+
+## 4. Module Internals
+
+### 4.1 Capture Layer
+
+**libpcap callback model:** `pcap_loop()` blocks and invokes our callback for each packet. The callback wraps the raw `u_char*` in a `PacketView` (zero-copy) and forwards it. `Stop()` calls `pcap_breakloop()` from any thread (signal-safe via `std::atomic<bool>`).
+
+**File vs Live:** Same `CaptureSource` interface. `FileSource` uses `pcap_next_ex()` in a loop instead of `pcap_loop()`.
+
+### 4.2 Dissection Pipeline
+
+Each dissector is a free function: `ParseX(span) → DissectResult<XInfo>`. The `Dissect()` orchestrator chains them:
 
 ```cpp
-DissectResult<EthernetInfo> ParseEthernet(std::span<const uint8_t> data);
-// Returns Unexpected(DissectError::kTruncated) if data.size() < 14
+auto eth = ParseEthernet(packet.data);   // span into pcap buffer
+auto ip  = ParseIp(eth->payload);        // span into eth's payload
+auto tcp = ParseTcp(ip->payload);        // span into ip's payload
 ```
 
-### 4. Protocol Layer (`src/protocol/`) — Phase 3+
+Every `.payload` is a sub-span — no copying at any level.
 
-Application-layer protocol parsing (not yet implemented).
+### 4.3 TCP Stream Reassembly
 
-| Protocol | Detection Heuristic | Description |
-|----------|-------------------|-------------|
-| HTTP/1.1 | Starts with `GET`/`POST`/`HTTP` | Request/response parsing |
-| HTTP/2 | Connection preface `PRI * HTTP/2.0` | Frame-level parsing (HEADERS, DATA) |
-| gRPC | HTTP/2 + `content-type: application/grpc` | Protobuf length-delimited messages |
-| DNS | UDP port 53 or payload structure | Query/response parsing |
-| TLS | First byte `0x16` (handshake) | ClientHello/ServerHello analysis |
-| WebSocket | HTTP Upgrade header | Frame parsing after handshake |
+**Connection key normalization:** Both directions of a connection must map to the same key. We normalize by always putting the lower port in `key.src_port`. The SYN sender determines who is the "client."
 
-**Smart detection** (`detector.cpp`): Checks payload byte patterns first (content-based), uses port numbers as secondary hints.
+**Direction detection:** Each packet's direction is determined by comparing its src\_port to the normalized key, not by tracking the SYN sender repeatedly.
 
-### 5. Analyzer Layer (`src/analyzer/`) — Phase 5+
+**Memory protection:** Per-stream limit (10MB), max streams (1000), idle timeout (30s). When limits are hit: segments are dropped, oldest streams are evicted, idle streams are flushed.
 
-Statistical analysis and latency computation (not yet implemented).
+### 4.4 HTTP/1.1 Parser
 
-- **Latency calculator**: Correlates request → response pairs, computes time deltas
-- **T-Digest**: Streaming percentile estimation (P50/P95/P99) with O(1) amortized updates
-- **Connection tracker**: Lifecycle management for TCP connections (SYN → ESTABLISHED → FIN)
-
-### 6. TUI Layer (`src/tui/`) — Phase 4+
-
-Terminal user interface built with FTXUI (not yet implemented).
+**Incremental state machine:** Data arrives in arbitrary-sized chunks from the reassembler. The parser accumulates bytes in a `std::string` buffer and parses as much as possible on each `Feed()` call.
 
 ```
-┌─ Traffic ───────────────────────────────┐
-│  QPS: ▁▂▃▅▇█▇▅▃▂  BW: ▂▃▅▇█▇▅▃▁      │
-├─ Requests ──────────────────────────────┤
-│  Time     Proto  Method  URL     Status │
-│  14:32:01 HTTP   GET     /api    200    │
-│  14:32:01 HTTP   POST    /login  401    │
-│> 14:32:02 gRPC   Unary   /svc    OK     │
-├─ Detail ────────────────────────────────┤
-│  Headers:                                │
-│    Content-Type: application/json        │
-│  Body:                                   │
-│    {"user": "admin", "role": "root"}     │
-└─────────────────────────────────────────┘
+kStartLine → kHeaders → kBody → kComplete → kStartLine (pipeline)
 ```
 
-### 7. Export Layer (`src/export/`) — Phase 7
+**Request-response pairing:** The parser maintains `has_request_` and `has_response_` flags. When both are set, it emits a `HttpTransaction` with latency = `response.timestamp - request.timestamp`.
 
-Export captured data in standard formats (not yet implemented).
+### 4.5 DNS Parser
 
-| Format | Use Case |
-|--------|----------|
-| pcap | Open in Wireshark for deep analysis |
-| HAR | Import into browser DevTools, Postman |
-| JSON | Scripting, CI pipelines, log aggregation |
+Operates on raw UDP payload (not via TCP reassembly). Key challenge: **name compression** — DNS names can contain pointer labels (`0xC0 xx`) that reference earlier parts of the packet. `ParseDnsName()` follows pointers recursively with a depth limit to prevent infinite loops.
 
-## Threading Model
+### 4.6 TLS Handshake Parser
 
-### Phase 1 (Current): Single-Threaded
+Parses only the handshake metadata (no decryption). The key value is **SNI extraction** from ClientHello extensions — this tells you which domain the client is connecting to, even though the traffic is encrypted. Extension parsing: walk the variable-length extension list, match by type ID (0x0000=SNI, 0x0010=ALPN, 0x002B=supported\_versions).
+
+### 4.7 Statistics & T-Digest
+
+**T-Digest compression:** When the centroid list exceeds `3 * compression` entries, merge adjacent centroids. The merge threshold depends on the centroid's quantile position — centroids near the median can absorb more, centroids at the tails stay small for accuracy.
+
+**Throughput:** A `std::deque<ByteSample>` with 1-second sliding window. Each packet pushes `{timestamp, bytes}`. Pruning is lazy — done during `Snapshot()`.
+
+### 4.8 Export Formats
+
+**pcap:** Raw 24-byte file header + 16-byte per-packet header + raw bytes. Written via `write()` syscall, not buffered stdio, for signal-safety.
+
+**HAR 1.2:** JSON structure with `log.entries[]` containing request/response pairs. Version comes from `WIREPEEK_VERSION` macro (auto-generated by CMake).
+
+**NDJSON:** One JSON object per line. Two types: `{"type":"packet",...}` for raw packets, `{"type":"http",...}` for HTTP transactions. Designed for `jq` processing and log aggregation.
+
+### 4.9 TUI
+
+**FTXUI component tree:** `Renderer` produces the DOM, `CatchEvent` handles keyboard. The render function is called on every frame (~10 FPS) and rebuilds the entire DOM from `UiState`.
+
+**Filter:** `UiState::GetFilteredEntries()` does case-insensitive substring matching on protocol/method/url fields. Filtering happens on the UI thread during render, not on the capture thread.
+
+**Sparkline:** PPS (packets per second) is sampled every 1 second in the capture thread and pushed to `UiState::pps_history_` (60-entry rolling deque). The sparkline renders using Unicode block chars ▁▂▃▄▅▆▇█ normalized to the window's max value.
+
+## 5. Threading Model
 
 ```
-Main Thread: capture → dissect → print (headless)
+┌─ Capture Thread ────────────────┐     ┌─ UI Thread ──────────────────┐
+│                                 │     │                              │
+│  pcap_loop()                    │     │  FTXUI Loop (10 FPS)         │
+│    │                            │     │    │                         │
+│    ▼                            │     │    ▼                         │
+│  Dissect() + TcpReassembler     │     │  UiState.GetFilteredEntries()│
+│  + ProtocolHandler              │     │  UiState.GetStats()          │
+│  + Statistics                   │     │    │                         │
+│    │                            │     │    ▼                         │
+│    ▼                            │     │  Render: stats bar           │
+│  UiState.AddEntry() ──mutex──→──┼──→──│          sparkline           │
+│  UiState.IncrementPackets()     │     │          request table       │
+│  UiState.PushPpsSample()        │     │          detail panel        │
+│                                 │     │          help bar            │
+└─────────────────────────────────┘     └──────────────────────────────┘
 ```
 
-### Phase 4+ (Planned): Multi-Threaded
+## 6. Build System
 
-```
-Capture Thread ──► Lock-free Queue ──► Analysis Thread ──► UI Thread
-     │                                       │
-     │            (SPSC ring buffer)         │
-     └─ pcap_loop()                          └─ FTXUI event loop
-```
-
-- **Capture thread**: Calls `pcap_loop()`, enqueues `OwnedPacket` into a lock-free SPSC queue
-- **Analysis thread**: Dequeues packets, runs dissection + protocol parsing + latency calculation
-- **UI thread**: FTXUI event loop, reads from shared state with atomic/mutex protection
-
-## Data Flow
-
-```
-Network Interface
-       │
-       ▼
-  ┌─────────┐     PacketView (zero-copy)
-  │ libpcap ├──────────────────────────┐
-  └─────────┘                          │
-                                       ▼
-                               ┌──────────────┐
-                               │ ParseEthernet│
-                               └──────┬───────┘
-                                      │ EthernetInfo.payload
-                                      ▼
-                               ┌──────────────┐
-                               │   ParseIp    │
-                               └──────┬───────┘
-                                      │ IpInfo.payload
-                            ┌─────────┴─────────┐
-                            ▼                   ▼
-                     ┌────────────┐      ┌────────────┐
-                     │  ParseTcp  │      │  ParseUdp  │
-                     └──────┬─────┘      └──────┬─────┘
-                            │                   │
-                            ▼                   ▼
-                     ┌────────────────────────────────┐
-                     │    Application Protocol         │
-                     │    Detection + Parsing           │
-                     │    (HTTP, gRPC, DNS, ...)        │
-                     └────────────────────────────────┘
-                                      │
-                            ┌─────────┴─────────┐
-                            ▼                   ▼
-                     ┌────────────┐      ┌────────────┐
-                     │  Analyzer  │      │   Export    │
-                     │  (latency) │      │  (HAR/JSON) │
-                     └──────┬─────┘      └────────────┘
-                            │
-                            ▼
-                     ┌────────────┐
-                     │  TUI / CLI │
-                     └────────────┘
-```
-
-## Build System
-
-The project uses CMake with FetchContent for dependency management:
+**CMake 3.20+** with `FetchContent` for all dependencies except libpcap (system).
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
 | libpcap | system | Packet capture |
 | fmt | 10.2.1 | String formatting |
 | spdlog | 1.14.1 | Logging |
-| CLI11 | 2.4.2 | Command-line parsing |
-| xxHash | 0.8.3 | Fast hashing (connection table) |
-| FTXUI | 5.0.0 | Terminal UI framework |
+| CLI11 | 2.4.2 | CLI argument parsing |
+| xxHash | 0.8.3 | Fast hashing |
+| FTXUI | 5.0.0 | Terminal UI |
 | GoogleTest | 1.15.2 | Unit testing |
 
-Build targets:
-- `wirepeek` — main executable
-- `wirepeek_lib` — static library (shared between executable and tests)
-- `wirepeek_tests` — GoogleTest test binary
+**Version management:** `project(VERSION x.y.z)` is the single source of truth. `configure_file()` generates `version.h` with `WIREPEEK_VERSION` macro. No hardcoded version strings anywhere.
 
-## Performance Design Principles
+**Build targets:** `wirepeek` (executable), `wirepeek_lib` (static library shared by exe and tests), `wirepeek_tests` (165 GoogleTest cases).
 
-1. **Zero-copy parsing**: Dissectors operate on `std::span` into the pcap buffer — no memory allocation per packet
-2. **Cache-friendly layout**: `PacketView` and `Info` structs are small, contiguous, and fit in cache lines
-3. **Lock-free communication**: SPSC ring buffer between capture and analysis threads (planned)
-4. **Batch processing**: Amortize overhead by processing packets in batches (planned)
-5. **SIMD acceleration**: Protocol header field extraction using SIMD intrinsics where applicable (planned)
-
-## Directory Structure
+## 7. Directory Structure
 
 ```
 wirepeek/
-├── include/wirepeek/           # Public headers
-│   ├── capture/                # Capture source interfaces
-│   ├── dissector/              # Protocol dissector headers
-│   ├── packet.h                # Core packet types
-│   ├── result.h                # Error handling
-│   ├── endian.h                # Byte order utilities
-│   ├── stream.h                # TCP stream types
-│   └── request.h               # Application-layer request types
-├── src/
-│   ├── capture/                # libpcap capture implementation
-│   ├── dissector/              # Protocol dissector implementations
-│   ├── cli/                    # CLI entry point
-│   └── CMakeLists.txt
-├── tests/
-│   ├── unit/                   # Unit tests (GoogleTest)
-│   └── pcaps/                  # Test capture files
-├── docs/
-│   ├── en/                     # English documentation
-│   └── zh/                     # Chinese documentation
-├── cmake/                      # CMake modules (FindPcap.cmake)
-├── .github/workflows/          # CI/CD pipelines
-├── CMakeLists.txt              # Root build configuration
-├── CHANGELOG.md
-├── LICENSE                     # Apache 2.0
-├── README.md                   # English README
-└── README.zh-CN.md             # Chinese README
+├── include/wirepeek/
+│   ├── capture/           # CaptureSource, PcapSource, FileSource
+│   ├── dissector/         # Ethernet/IP/TCP/UDP parsers, Dissect, TcpReassembler
+│   ├── protocol/          # Detector, Http1Parser, DNS, TLS, WebSocket
+│   ├── analyzer/          # TDigest, Statistics
+│   ├── export/            # PcapWriter, HarWriter, JsonWriter
+│   ├── tui/               # UiState, TuiApp
+│   ├── packet.h, stream.h, request.h, result.h, endian.h
+│   └── version.h.in       # CMake template → version.h
+├── src/                    # Implementations mirror include/ structure
+├── tests/unit/             # 165 GoogleTest cases
+├── docs/{en,zh}/           # This document
+├── .github/workflows/      # CI (multi-platform) + Release (static binaries, Docker, Homebrew)
+├── Dockerfile              # Alpine multi-stage → scratch image
+└── CMakeLists.txt          # Root build config + FetchContent
 ```
+
+## 8. Testing Strategy
+
+**Test pyramid:**
+- **Unit tests** (165): One test file per module. Hardcoded byte arrays for protocol parsers (no network or pcap files needed). Coverage: dissectors ~80%, reassembly ~95%, protocol parsers ~90%, export ~95%, UI state ~100%.
+- **Integration**: CLI headless mode with `--read <pcap>` and `--export json` verifies the full pipeline.
+- **CI**: Matrix build on Ubuntu 22.04/24.04 (gcc/clang) + macOS 14 (clang). Coverage uploaded to Codecov.
+
+**What's NOT unit-tested** (by design): `PcapSource`/`FileSource` (require libpcap runtime), `TuiApp` (requires terminal), `main.cpp` (integration-level).

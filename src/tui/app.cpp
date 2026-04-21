@@ -7,6 +7,7 @@
 #include <wirepeek/protocol/protocol_handler.h>
 #include <wirepeek/request.h>
 #include <wirepeek/tui/app.h>
+#include <wirepeek/version.h>
 
 #include <algorithm>
 #include <chrono>
@@ -17,7 +18,6 @@
 #include <ftxui/component/loop.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
-#include <ftxui/dom/table.hpp>
 #include <spdlog/spdlog.h>
 #include <thread>
 #include <vector>
@@ -56,7 +56,18 @@ ftxui::Color ProtocolColor(const std::string& proto) {
     return ftxui::Color::Blue;
   if (proto == "UDP")
     return ftxui::Color::Magenta;
+  if (proto == "DNS")
+    return ftxui::Color::Green;
   return ftxui::Color::GrayLight;
+}
+
+// Sparkline chars: ▁▂▃▄▅▆▇█
+const char* SparkChar(int value, int max_val) {
+  if (max_val <= 0)
+    return " ";
+  static const char* chars[] = {"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"};
+  int idx = std::clamp(value * 7 / std::max(max_val, 1), 0, 7);
+  return chars[idx];
 }
 
 }  // namespace
@@ -68,12 +79,9 @@ TuiApp::~TuiApp() {
 }
 
 void TuiApp::CaptureLoop(capture::CaptureSource& source) {
-  // Statistics collector.
   auto stats = std::make_shared<analyzer::Statistics>();
 
-  // Set up protocol handler.
   auto protocol_handler = std::make_unique<protocol::ProtocolHandler>(
-      // HTTP transaction callback.
       [this, stats](const ConnectionKey& /*key*/, const HttpTransaction& txn) {
         state_->IncrementHttpTransactions();
         stats->RecordHttpTransaction(txn);
@@ -90,7 +98,6 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
           entry.latency = fmt::format("{}ms", ms);
           entry.size = fmt::format("{}", txn.response.body_size);
 
-          // Build detail text.
           std::string detail;
           detail +=
               fmt::format("{} {} {}\n", txn.request.method, txn.request.url, txn.request.version);
@@ -110,7 +117,6 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
 
         state_->AddEntry(std::move(entry));
       },
-      // Raw data fallback — add as TCP/UDP entry.
       [this](const ConnectionKey& /*key*/, StreamDirection dir, std::span<const uint8_t> data) {
         TuiEntry entry;
         entry.timestamp = std::chrono::time_point_cast<std::chrono::microseconds>(
@@ -122,7 +128,6 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
         state_->AddEntry(std::move(entry));
       });
 
-  // Set up TCP reassembler.
   std::unique_ptr<dissector::TcpReassembler> reassembler;
   if (!config_.no_reassemble) {
     reassembler = std::make_unique<dissector::TcpReassembler>(
@@ -133,7 +138,10 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
         });
   }
 
-  // Capture loop.
+  // PPS tracking for sparkline.
+  int pps_counter = 0;
+  auto last_pps_push = std::chrono::steady_clock::now();
+
   source.Start([&](const PacketView& pkt) {
     if (!running_) {
       source.Stop();
@@ -142,16 +150,23 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
 
     state_->IncrementPackets(pkt.data.size());
     stats->RecordPacket(pkt.data.size(), pkt.timestamp);
+    ++pps_counter;
+
+    // Push PPS sample every second.
+    auto now_steady = std::chrono::steady_clock::now();
+    if (now_steady - last_pps_push >= std::chrono::seconds(1)) {
+      state_->PushPpsSample(pps_counter);
+      pps_counter = 0;
+      last_pps_push = now_steady;
+    }
 
     auto dissected = dissector::Dissect(pkt);
 
-    // Feed to reassembler if TCP.
     if (reassembler) {
       reassembler->ProcessPacket(dissected, pkt.timestamp);
       state_->SetStreamCount(reassembler->StreamCount());
     }
 
-    // For non-TCP packets (UDP, ARP, etc.), add entry directly.
     if (!dissected.tcp && dissected.ip) {
       TuiEntry entry;
       entry.timestamp = pkt.timestamp;
@@ -166,7 +181,6 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
       state_->AddEntry(std::move(entry));
     }
 
-    // Periodically push analyzer stats to UI state.
     auto snap = stats->Snapshot();
     state_->UpdateAnalyzerStats(snap.p50_latency_us, snap.p95_latency_us, snap.p99_latency_us,
                                 snap.throughput_mbps, snap.qps);
@@ -178,27 +192,29 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
 
   auto screen = ftxui::ScreenInteractive::Fullscreen();
 
-  // Start capture in background thread.
   std::thread capture_thread([this, &source]() {
     CaptureLoop(*source);
     running_ = false;
   });
 
-  // UI state.
   int selected = 0;
   bool show_detail = true;
+  bool filter_active = false;
+  std::string filter_text;
   std::vector<TuiEntry> cached_entries;
   TuiStats cached_stats;
 
-  // Build the FTXUI component tree.
   auto component = ftxui::Renderer([&]() {
-    // Refresh data from shared state.
-    cached_entries = state_->GetEntries();
+    if (filter_text.empty()) {
+      cached_entries = state_->GetEntries();
+    } else {
+      cached_entries = state_->GetFilteredEntries(filter_text);
+    }
     cached_stats = state_->GetStats();
 
     using namespace ftxui;
 
-    // ── Stats bar ──
+    // ── Stats bar with sparkline ──
     auto p95_str = cached_stats.p95_latency_us > 0
                        ? fmt::format("{}ms", cached_stats.p95_latency_us / 1000)
                        : "-";
@@ -206,26 +222,46 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
                       ? fmt::format("{:.1f}Mbps", cached_stats.throughput_mbps)
                       : "-";
 
+    // Build sparkline string.
+    std::string sparkline;
+    int max_pps = 1;
+    for (int v : cached_stats.pps_history)
+      max_pps = std::max(max_pps, v);
+    for (int v : cached_stats.pps_history)
+      sparkline += SparkChar(v, max_pps);
+
     auto stats_bar = hbox({
-                         text(" Pkts: ") | bold,
+                         text(" Pkts:") | bold,
                          text(fmt::format("{}", cached_stats.packet_count)) | color(Color::Cyan),
-                         text("  Streams: ") | bold,
+                         text(" Strm:") | bold,
                          text(fmt::format("{}", cached_stats.stream_count)) | color(Color::Yellow),
-                         text("  HTTP: ") | bold,
+                         text(" HTTP:") | bold,
                          text(fmt::format("{}", cached_stats.http_txn_count)) | color(Color::Green),
-                         text("  P95: ") | bold,
+                         text(" P95:") | bold,
                          text(p95_str) | color(Color::Magenta),
-                         text("  ") | bold,
-                         text(tp_str) | color(Color::CyanLight),
+                         separator(),
+                         text(sparkline) | color(Color::GreenLight) | size(WIDTH, LESS_THAN, 30),
                          filler(),
+                         text(tp_str) | color(Color::CyanLight),
                          text(" wirepeek ") | bold | color(Color::Cyan),
                      }) |
                      borderLight;
 
+    // ── Filter bar ──
+    Element filter_bar_el = text("");
+    if (filter_active || !filter_text.empty()) {
+      filter_bar_el =
+          hbox({
+              text(" Filter: ") | bold | color(Color::Yellow),
+              text(filter_text + (filter_active ? "▏" : "")) | color(Color::White),
+              filler(),
+              text(fmt::format(" {}/{}", cached_entries.size(), state_->EntryCount())) | dim,
+          }) |
+          borderLight;
+    }
+
     // ── Request table ──
     std::vector<Element> table_rows;
-
-    // Header row.
     table_rows.push_back(hbox({
         text("Time") | size(WIDTH, EQUAL, 12) | bold,
         separator(),
@@ -241,12 +277,10 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
     }));
     table_rows.push_back(separatorLight());
 
-    // Clamp selected index.
     if (!cached_entries.empty()) {
       selected = std::clamp(selected, 0, static_cast<int>(cached_entries.size()) - 1);
     }
 
-    // Visible rows (show last N entries that fit).
     int max_visible = 20;
     int start_idx = std::max(0, static_cast<int>(cached_entries.size()) - max_visible);
     for (int i = start_idx; i < static_cast<int>(cached_entries.size()); ++i) {
@@ -268,9 +302,8 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
           text(e.latency) | size(WIDTH, EQUAL, 8),
       });
 
-      if (is_selected) {
+      if (is_selected)
         row = row | inverted;
-      }
       table_rows.push_back(row);
     }
 
@@ -282,7 +315,6 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
         selected < static_cast<int>(cached_entries.size())) {
       const auto& e = cached_entries[selected];
       if (!e.detail.empty()) {
-        // Split detail into lines.
         std::vector<Element> detail_lines;
         std::string line;
         for (char c : e.detail) {
@@ -302,24 +334,52 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
     // ── Help bar ──
     auto help_bar = hbox({
                         text(" q") | bold | color(Color::Yellow),
-                        text(":quit  "),
+                        text(":quit "),
                         text("↑↓") | bold | color(Color::Yellow),
-                        text(":navigate  "),
+                        text(":nav "),
                         text("d") | bold | color(Color::Yellow),
-                        text(":detail  "),
+                        text(":detail "),
+                        text("/") | bold | color(Color::Yellow),
+                        text(":filter "),
+                        text("Esc") | bold | color(Color::Yellow),
+                        text(":clear"),
                     }) |
                     dim;
 
     return vbox({
         stats_bar,
+        filter_bar_el,
         request_list,
         detail_panel,
         help_bar,
     });
   });
 
-  // Wrap with event handler for keyboard input.
   component = CatchEvent(component, [&](ftxui::Event event) -> bool {
+    // Filter mode input.
+    if (filter_active) {
+      if (event == ftxui::Event::Escape) {
+        filter_active = false;
+        filter_text.clear();
+        return true;
+      }
+      if (event == ftxui::Event::Return) {
+        filter_active = false;
+        return true;
+      }
+      if (event == ftxui::Event::Backspace) {
+        if (!filter_text.empty())
+          filter_text.pop_back();
+        return true;
+      }
+      if (event.is_character()) {
+        filter_text += event.character();
+        return true;
+      }
+      return false;
+    }
+
+    // Normal mode.
     if (event == ftxui::Event::Character('q') || event == ftxui::Event::Escape) {
       running_ = false;
       source->Stop();
@@ -340,24 +400,27 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
       show_detail = !show_detail;
       return true;
     }
-    // Auto-scroll to bottom on new data.
+    if (event == ftxui::Event::Character('/')) {
+      filter_active = true;
+      filter_text.clear();
+      return true;
+    }
     if (event == ftxui::Event::Custom) {
-      selected = std::max(0, static_cast<int>(cached_entries.size()) - 1);
+      if (filter_text.empty()) {
+        selected = std::max(0, static_cast<int>(cached_entries.size()) - 1);
+      }
       return true;
     }
     return false;
   });
 
-  // Run FTXUI loop with periodic refresh.
   auto loop = ftxui::Loop(&screen, component);
   while (running_ && !loop.HasQuitted()) {
     loop.RunOnce();
-    // Post a refresh event periodically.
     screen.Post(ftxui::Event::Custom);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // Wait for capture thread to finish.
   running_ = false;
   source->Stop();
   if (capture_thread.joinable()) {
