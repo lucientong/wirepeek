@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(wirepeek
-  VERSION 0.7.0
+  VERSION 1.0.0
   LANGUAGES CXX
   DESCRIPTION "High-performance network packet analyzer with modern TUI"
 )
