@@ -121,7 +121,9 @@ TEST(ProtocolHandlerTest, UnknownProtocolWithRawDataCallback) {
         http_txns.push_back(txn);
       },
       [&](const wirepeek::ConnectionKey& /*key*/, wirepeek::StreamDirection dir,
-          std::span<const uint8_t> data) { raw_data_calls.push_back({dir, data.size()}); });
+          std::span<const uint8_t> data) {
+        raw_data_calls.push_back({dir, data.size()});
+      });
 
   auto key = MakeConnectionKey(MakeIpv4(192, 168, 1, 1), 12345, MakeIpv4(192, 168, 1, 2), 80);
 
@@ -347,7 +349,9 @@ TEST(ProtocolHandlerTest, CloseBeforeProtocolDetection) {
         http_txns.push_back(txn);
       },
       [&](const wirepeek::ConnectionKey& /*key*/, wirepeek::StreamDirection dir,
-          std::span<const uint8_t> data) { raw_calls.push_back({dir, data.size()}); });
+          std::span<const uint8_t> data) {
+        raw_calls.push_back({dir, data.size()});
+      });
 
   auto key = MakeConnectionKey(MakeIpv4(192, 168, 1, 1), 12345, MakeIpv4(192, 168, 1, 2), 80);
 
