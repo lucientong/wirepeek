@@ -48,9 +48,9 @@ wirepeek::dissector::StreamEvent MakeStreamEvent(
     wirepeek::StreamDirection dir = wirepeek::StreamDirection::kClientToServer) {
   return wirepeek::dissector::StreamEvent{
       .key = key,
+      .direction = dir,
       .type = type,
       .data = data,
-      .direction = dir,
   };
 }
 
