@@ -11,7 +11,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/lucientong/wirepeek)](https://hub.docker.com/r/lucientong/wirepeek)
 [![GitHub Downloads](https://img.shields.io/github/downloads/lucientong/wirepeek/total)](https://github.com/lucientong/wirepeek/releases)
 
-[中文文档](README.zh-CN.md) · [Architecture](docs/en/architecture.md) · [Changelog](CHANGELOG.md)
+[中文文档](README.zh-CN.md) · [Architecture](docs/en/architecture.md) · [Benchmarks](docs/en/benchmarks.md) · [Changelog](CHANGELOG.md)
 
 ## Why Wirepeek?
 
@@ -20,17 +20,18 @@
 | **Unreadable output** | tcpdump shows raw hex dumps and TCP flags | Auto-reassembles streams, shows `GET /api → 200 OK (43ms)` |
 | **GUI required** | Wireshark needs a desktop — unusable over SSH | Modern TUI (FTXUI) works in any terminal, SSH, tmux, Docker |
 | **Port-based filtering only** | tcpdump requires `port 80` for HTTP | Heuristic protocol detection — identifies HTTP on any port |
-| **No latency analysis** | Need external scripts to calculate timing | Built-in P50/P95/P99 latency with T-Digest, real-time charts |
-| **GC pauses drop packets** | Go-based alternatives (termshark) lose packets at high throughput | C++ zero-copy parsing, lock-free queues, handles 10Gbps+ |
+| **No latency analysis** | Need external scripts to calculate timing | Built-in P50/P95/P99 latency with T-Digest, endpoint aggregation |
+| **Predictable packet processing** | Managed runtimes can introduce garbage-collection pauses | C++ parsing with zero-copy spans into the libpcap packet buffer |
 
 ## Features
 
-- **Auto Protocol Detection** — HTTP/1.1, HTTP/2, gRPC, WebSocket, DNS, TLS, MySQL, Redis
-- **Request/Response View** — See URL, method, status code, headers, body — not raw bytes
-- **Built-in Latency Analysis** — Request→Response time, TCP/TLS handshake duration, P50/P95/P99
-- **Modern TUI** — Scrollable lists, detail panels, real-time traffic charts, interactive filters
-- **Zero-Copy Parsing** — Pointer arithmetic on mmap'd ring buffer, no per-packet allocation
-- **Export Formats** — pcap (Wireshark), HAR (browser), JSON (scripting/CI)
+- **Application protocols** — HTTP/1.1 (chunked, pipelining, HEAD/204/304), DNS, TLS handshake metadata (SNI/ALPN), WebSocket frames, Redis RESP, minimal HTTP/2 / gRPC framing
+- **Request/Response View** — Method, URL, status, headers, sizes, and capture-time latency
+- **Passive APM** — Normalized endpoint stats, TCP handshake / TTFB / transfer timing, OpenMetrics export
+- **Modern TUI** — Scrollable lists, detail panels, sparklines, filters, pause/follow, endpoint view (`e`)
+- **Link-layer support** — Ethernet, BSD NULL/LOOP, Linux SLL/SLL2, raw IP (`lo0` / `-i any` friendly)
+- **Zero-Copy Packet Dissection** — Non-owning spans into the libpcap callback buffer
+- **Export Formats** — pcap, HAR 1.2, NDJSON
 - **Headless Mode** — tcpdump-like output for piping and scripting
 
 ## Installation
@@ -68,7 +69,6 @@ yay -S wirepeek
 ### Debian / Ubuntu
 
 ```bash
-# Download .deb from releases
 curl -LO https://github.com/lucientong/wirepeek/releases/latest/download/wirepeek_amd64.deb
 sudo dpkg -i wirepeek_amd64.deb
 ```
@@ -77,20 +77,24 @@ sudo dpkg -i wirepeek_amd64.deb
 
 ```bash
 # Prerequisites: CMake 3.20+, C++20 compiler, libpcap-dev
-# Ubuntu/Debian:
-sudo apt install build-essential cmake libpcap-dev
+sudo apt install build-essential cmake libpcap-dev   # Ubuntu/Debian
+brew install cmake                                   # macOS
 
-# macOS:
-brew install cmake
-
-# Build
 git clone https://github.com/lucientong/wirepeek.git
 cd wirepeek
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-
-# Install
 sudo cmake --install build
+```
+
+Optional builds:
+
+```bash
+cmake -B build-bench -DWIREPEEK_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-bench -j$(nproc)
+
+cmake -B build-fuzz -DWIREPEEK_BUILD_FUZZERS=ON -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+cmake --build build-fuzz -j$(nproc)
 ```
 
 ## Quick Start
@@ -108,11 +112,17 @@ wirepeek --read capture.pcap
 # Headless mode (tcpdump-like output)
 sudo wirepeek --headless -i eth0 -c 100
 
-# Filter by protocol
-sudo wirepeek -i eth0 --protocol http
-
 # Export as HAR
 sudo wirepeek -i eth0 --export har -o output.har
+
+# Print normalized endpoint statistics at exit
+wirepeek --headless --read capture.pcap --endpoints
+
+# Serve Prometheus/OpenMetrics while capturing
+sudo wirepeek --headless -i eth0 --metrics-listen 127.0.0.1:9464
+
+# Load SSLKEYLOGFILE secrets (experimental; parsing only, no decryption yet)
+wirepeek --read capture.pcap --tls-keylog sslkeys.log
 ```
 
 ### Example Output (Headless Mode)
@@ -120,9 +130,8 @@ sudo wirepeek -i eth0 --export har -o output.har
 ```
 14:32:01.482910  192.168.1.10:54312 -> 93.184.216.34:80 TCP [SYN] len=0
 14:32:01.523847  93.184.216.34:80 -> 192.168.1.10:54312 TCP [SYN, ACK] len=0
-14:32:01.523901  192.168.1.10:54312 -> 93.184.216.34:80 TCP [ACK] len=0
 14:32:01.524102  192.168.1.10:54312 -> 93.184.216.34:80 TCP [PSH, ACK] len=73
-14:32:01.565432  93.184.216.34:80 -> 192.168.1.10:54312 TCP [ACK] len=1256
+GET /api/users HTTP/1.1 -> 200 OK (43ms) [1256 bytes]
 ```
 
 ### TUI Mode (Default)
@@ -139,10 +148,9 @@ sudo wirepeek -i eth0 --export har -o output.har
 ├──────────┴──────┴──────┴──────────────────┴──────┴──────────────────┤
 │ GET /api/posts?page=2 HTTP/1.1                                      │
 │ Host: example.com                                                   │
-│ Accept: application/json                                            │
 │ → 200 OK (Content-Length: 45231)                                    │
 ├─────────────────────────────────────────────────────────────────────┤
-│ q:quit ↑↓:nav d:detail /:filter Esc:clear                          │
+│ q:quit ↑↓:nav d:detail /:filter Space:pause e:endpoints Esc:clear  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -150,25 +158,36 @@ sudo wirepeek -i eth0 --export har -o output.har
 
 ```
   Network ──→ libpcap ──→ Dissect ──→ TCP Reassembly ──→ Protocol Detection
-                           (L2-L4)    (reorder/dedup)     (HTTP/DNS/TLS/WS)
+                           (L2-L4)    (reorder/dedup)     (HTTP/DNS/TLS/WS/Redis/h2)
                                                                 │
                               ┌──────────────────┬──────────────┤
                               ▼                  ▼              ▼
                           Analyzer           TUI/CLI         Export
-                        (T-Digest P95)   (FTXUI + filter)  (pcap/HAR/JSON)
+                     (T-Digest + endpoints) (FTXUI)   (pcap/HAR/JSON/metrics)
 ```
 
-See [Architecture & Design Documentation](docs/en/architecture.md) for implementation details, design decisions, and module internals.
+See [Architecture & Design Documentation](docs/en/architecture.md) for implementation details.
+
+Capture processing and the UI currently share state through a mutex. Packet dissectors use
+zero-copy spans into libpcap-provided buffers while those buffers are valid. Publish
+throughput claims only after measuring with the [benchmark suite](docs/en/benchmarks.md).
+
+## Versioning
+
+| Line | Focus |
+|------|-------|
+| **v1.0.x** | Correctness: capture timestamps, HTTP framing, link types, DNS/TLS/WS wiring |
+| **v1.1.x** | PassivePM: endpoint aggregation, timing breakdown, Redis, OpenMetrics, benchmarks/fuzz |
+| **Later** | Full TLS decryption (experimental keylog today), richer HPACK, MySQL/PostgreSQL |
 
 ## Contributing
-
-Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) with C++20 extensions
 4. Ensure all tests pass (`ctest --test-dir build`)
-5. Submit a Pull Request
+5. See [docs/en/release-checklist.md](docs/en/release-checklist.md) before tagging a release
+6. Submit a Pull Request
 
 ## License
 

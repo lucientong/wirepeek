@@ -37,19 +37,19 @@ Network / pcap file
 
 A single packet's journey:
 
-1. **libpcap** delivers a raw buffer via callback → wrapped in `PacketView` (non-owning `span`, zero allocation)
-2. **`Dissect()`** chains `ParseEthernet → ParseIp → ParseTcp/ParseUdp` — each returns an `Info` struct with a `.payload` span pointing into the original buffer
-3. **`TcpReassembler`** indexes by `ConnectionKey`, tracks sequence numbers, buffers out-of-order segments, emits `StreamEvent::kData` with in-order bytes
-4. **`ProtocolHandler`** calls `DetectProtocol()` on first data, creates a per-stream parser (e.g., `Http1Parser`), routes subsequent data
-5. **`Http1Parser`** incrementally parses request line → headers → body, pairs with response, calculates latency, emits `HttpTransaction`
-6. **`Statistics`** feeds latency into `TDigest` for P50/P95/P99, tracks throughput via sliding window
-7. **`UiState`** (mutex-protected) receives the entry, the TUI renders on next 100ms tick
+1. **libpcap** delivers a raw buffer via callback → wrapped in `PacketView` (non-owning `span` + `LinkType`)
+2. **`Dissect()`** selects L2 by link type (Ethernet / NULL / SLL / RAW) then `ParseIp → ParseTcp/ParseUdp`
+3. **`TcpReassembler`** indexes by `ConnectionKey`, reorders segments (with capture timestamps), emits `StreamEvent`
+4. **`ProtocolHandler`** detects the application protocol and emits a typed `AppEvent` (HTTP/DNS/TLS/WS/Redis/h2)
+5. **`Http1Parser`** (and siblings) pair requests/responses using capture timestamps for latency
+6. **`Statistics` / `EndpointStats`** maintain session percentiles and a 1-second sliding throughput window
+7. **`UiState`** (mutex-protected) receives display rows; the TUI renders on a ~100ms tick
 
 ## 3. Design Decisions
 
 ### 3.1 Zero-Copy Parsing
 
-**Decision:** Dissectors operate on `std::span<const uint8_t>` pointing into the pcap ring buffer. No per-packet memory allocation.
+**Decision:** Dissectors operate on `std::span<const uint8_t>` pointing into the buffer supplied by the libpcap callback. No per-packet allocation is needed for dissection.
 
 **Why:** At 10Gbps (~1M packets/sec), even a 64-byte allocation per packet = 64MB/s of heap churn. By using spans, parsing is just pointer arithmetic. The trade-off: `PacketView` must not outlive the pcap buffer — that's why `OwnedPacket` exists for cross-thread handoff.
 
@@ -65,9 +65,9 @@ A single packet's journey:
 
 ### 3.3 TCP Reassembly with Ordered Map
 
-**Decision:** Out-of-order segments are stored in `std::map<uint32_t, vector<uint8_t>>` keyed by sequence number.
+**Decision:** Out-of-order segments are stored in `std::map<uint32_t, BufferedSegment>` keyed by sequence number, where each buffered segment keeps its capture timestamp.
 
-**Why:** A contiguous ring buffer would be simpler but wastes memory for sparse arrivals. A map only stores what's actually arrived out of order. When the expected segment arrives, we scan the map for contiguous entries and flush them. Typical real-world out-of-order rate is <1%, so the map is usually empty.
+**Why:** A contiguous ring buffer would be simpler but wastes memory for sparse arrivals. A map only stores what's actually arrived out of order. When the expected segment arrives, we scan the map for contiguous entries and flush them. Typical real-world out-of-order rate is <1%, so the map is usually empty. Buffered bytes count toward the per-stream memory quota; partial retransmissions are trimmed to the unacked suffix.
 
 **Sequence wraparound:** `static_cast<int32_t>(a - b) < 0` correctly handles the full 32-bit sequence space.
 
@@ -91,11 +91,11 @@ A single packet's journey:
 
 ### 3.6 Threading: Mutex Over Lock-Free
 
-**Decision:** Capture thread and UI thread communicate via `UiState` protected by `std::mutex`.
+**Decision:** Capture thread and UI thread communicate via `UiState` protected by `std::mutex`. A bounded `SpscQueue` utility exists for measured upgrades.
 
-**Why:** Lock-free SPSC queues are faster but add complexity. At our refresh rate (10 UI frames/sec) and entry rate (~1K entries/sec), mutex contention is negligible. The critical section is tiny: copy a struct into a deque or read a deque into a vector. If profiling shows contention, upgrade to lock-free — but measure first.
+**Why:** Lock-free SPSC queues are faster but add complexity. At our refresh rate (10 UI frames/sec) and entry rate (~1K entries/sec), mutex contention is typically negligible. Measure with the benchmark suite before claiming higher throughput or switching the hot path.
 
-**Where:** `include/wirepeek/tui/ui_state.h`.
+**Where:** `include/wirepeek/tui/ui_state.h`, `include/wirepeek/util/spsc_queue.h`.
 
 ## 4. Module Internals
 
@@ -147,7 +147,7 @@ Parses only the handshake metadata (no decryption). The key value is **SNI extra
 
 **T-Digest compression:** When the centroid list exceeds `3 * compression` entries, merge adjacent centroids. The merge threshold depends on the centroid's quantile position — centroids near the median can absorb more, centroids at the tails stay small for accuracy.
 
-**Throughput:** A `std::deque<ByteSample>` with 1-second sliding window. Each packet pushes `{timestamp, bytes}`. Pruning is lazy — done during `Snapshot()`.
+**Throughput:** A `std::deque<ByteSample>` with a 1-second sliding window. `Snapshot(now)` prunes expired samples and computes Mbps/QPS as rates over the window duration. Session latency percentiles remain cumulative for the capture session.
 
 ### 4.8 Export Formats
 

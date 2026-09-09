@@ -11,7 +11,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/lucientong/wirepeek)](https://hub.docker.com/r/lucientong/wirepeek)
 [![GitHub Downloads](https://img.shields.io/github/downloads/lucientong/wirepeek/total)](https://github.com/lucientong/wirepeek/releases)
 
-[English](README.md) · [架构文档](docs/zh/architecture.md) · [更新日志](CHANGELOG.md)
+[English](README.md) · [架构文档](docs/zh/architecture.md) · [基准测试](docs/en/benchmarks.md) · [更新日志](CHANGELOG.md)
 
 ## 为什么选择 Wirepeek？
 
@@ -20,17 +20,18 @@
 | **输出不可读** | tcpdump 显示原始十六进制和 TCP 标志 | 自动重组流，显示 `GET /api → 200 OK (43ms)` |
 | **需要 GUI** | Wireshark 需要桌面环境 — SSH 下无法使用 | 现代 TUI (FTXUI)，支持终端、SSH、tmux、Docker |
 | **仅基于端口过滤** | tcpdump 需要 `port 80` 来过滤 HTTP | 启发式协议检测 — 在任意端口识别 HTTP |
-| **无延迟分析** | 需要外部脚本计算时延 | 内置 P50/P95/P99 延迟统计 (T-Digest)，实时图表 |
-| **GC 导致丢包** | Go 实现的工具 (termshark) 高吞吐下丢包 | C++ 零拷贝解析，无锁队列，支持 10Gbps+ |
+| **无延迟分析** | 需要外部脚本计算时延 | 内置 P50/P95/P99（T-Digest）与端点聚合 |
+| **可预测的数据包处理** | 托管运行时可能引入垃圾回收停顿 | C++ 解析，使用指向 libpcap 数据包缓冲区的零拷贝 span |
 
 ## 核心特性
 
-- **自动协议检测** — HTTP/1.1、HTTP/2、gRPC、WebSocket、DNS、TLS、MySQL、Redis
-- **请求/响应视图** — 看到 URL、方法、状态码、请求头、请求体 — 而非原始字节
-- **内置延迟分析** — 请求→响应时间、TCP/TLS 握手时长、P50/P95/P99 百分位
-- **现代终端界面** — 可滚动列表、详情面板、实时流量图表、交互式过滤器
-- **零拷贝解析** — 直接在 mmap 环形缓冲区上指针操作，无逐包内存分配
-- **多种导出格式** — pcap (Wireshark)、HAR (浏览器)、JSON (脚本/CI)
+- **应用层协议** — HTTP/1.1（chunked、pipelining、HEAD/204/304）、DNS、TLS 握手元数据（SNI/ALPN）、WebSocket、Redis RESP、最小 HTTP/2 / gRPC 帧解析
+- **请求/响应视图** — 方法、URL、状态码、请求头、大小与基于抓包时间戳的延迟
+- **被动 APM** — 归一化端点统计、TCP 握手 / TTFB / 传输时长、OpenMetrics 导出
+- **现代终端界面** — 可滚动列表、详情面板、流量 sparkline、过滤、暂停/跟随、端点视图（`e`）
+- **链路层支持** — Ethernet、BSD NULL/LOOP、Linux SLL/SLL2、Raw IP（适配 `lo0` / `-i any`）
+- **零拷贝数据包解析** — 非持有型 span 指向 libpcap 回调缓冲区
+- **多种导出格式** — pcap、HAR 1.2、NDJSON
 - **无头模式** — 类 tcpdump 输出，支持管道和脚本
 
 ## 安装
@@ -46,128 +47,69 @@ brew install lucientong/tap/wirepeek
 从 [GitHub Releases](https://github.com/lucientong/wirepeek/releases/latest) 下载：
 
 ```bash
-# Linux x86_64
 curl -Lo wirepeek https://github.com/lucientong/wirepeek/releases/latest/download/wirepeek-linux-x86_64
 chmod +x wirepeek && sudo mv wirepeek /usr/local/bin/
-
-# Linux arm64
-curl -Lo wirepeek https://github.com/lucientong/wirepeek/releases/latest/download/wirepeek-linux-arm64
-chmod +x wirepeek && sudo mv wirepeek /usr/local/bin/
-
-# macOS (通用二进制)
-curl -Lo wirepeek https://github.com/lucientong/wirepeek/releases/latest/download/wirepeek-macos-universal
-chmod +x wirepeek && sudo mv wirepeek /usr/local/bin/
-```
-
-### AUR (Arch Linux) - 待支持
-
-```bash
-yay -S wirepeek
-```
-
-### Debian / Ubuntu
-
-```bash
-curl -LO https://github.com/lucientong/wirepeek/releases/latest/download/wirepeek_amd64.deb
-sudo dpkg -i wirepeek_amd64.deb
 ```
 
 ### 从源码构建
 
 ```bash
-# 前置条件：CMake 3.20+，支持 C++20 的编译器，libpcap-dev
-# Ubuntu/Debian:
-sudo apt install build-essential cmake libpcap-dev
+sudo apt install build-essential cmake libpcap-dev   # Ubuntu/Debian
+brew install cmake                                   # macOS
 
-# macOS:
-brew install cmake
-
-# 构建
 git clone https://github.com/lucientong/wirepeek.git
 cd wirepeek
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-
-# 安装
 sudo cmake --install build
+```
+
+可选构建：
+
+```bash
+cmake -B build-bench -DWIREPEEK_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-bench -j$(nproc)
+
+cmake -B build-fuzz -DWIREPEEK_BUILD_FUZZERS=ON -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+cmake --build build-fuzz -j$(nproc)
 ```
 
 ## 快速开始
 
 ```bash
-# 在网络接口上抓包（需要 root/sudo）
 sudo wirepeek -i eth0
-
-# 使用 BPF 过滤表达式
 sudo wirepeek -i eth0 -f "tcp port 80"
-
-# 读取 pcap 文件
 wirepeek --read capture.pcap
-
-# 无头模式（类 tcpdump 输出）
 sudo wirepeek --headless -i eth0 -c 100
-
-# 按协议过滤
-sudo wirepeek -i eth0 --protocol http
-
-# 导出为 HAR 格式
 sudo wirepeek -i eth0 --export har -o output.har
-```
-
-### 示例输出（无头模式）
-
-```
-14:32:01.482910  192.168.1.10:54312 -> 93.184.216.34:80 TCP [SYN] len=0
-14:32:01.523847  93.184.216.34:80 -> 192.168.1.10:54312 TCP [SYN, ACK] len=0
-14:32:01.523901  192.168.1.10:54312 -> 93.184.216.34:80 TCP [ACK] len=0
-14:32:01.524102  192.168.1.10:54312 -> 93.184.216.34:80 TCP [PSH, ACK] len=73
-14:32:01.565432  93.184.216.34:80 -> 192.168.1.10:54312 TCP [ACK] len=1256
-```
-
-### TUI 模式（默认）
-
-```
-┌ Pkts:4821 Strm:23 HTTP:15 P95:43ms │▁▂▃▅▇█▇▅▃│ 2.3Mbps  wirepeek ┐
-├ Filter: /api  (12/4821) ────────────────────────────────────────────┤
-├──────────┬──────┬──────┬──────────────────┬──────┬──────────────────┤
-│ 时间     │ 协议 │ 方法 │ URL              │ 状态 │ 延迟             │
-│ 14:32:01 │ HTTP │ GET  │ /api/users       │  200 │  43ms            │
-│ 14:32:01 │ HTTP │ POST │ /api/login       │  401 │  12ms            │
-│>14:32:02 │ HTTP │ GET  │ /api/posts?page=2│  200 │ 120ms            │
-│ 14:32:03 │ DNS  │      │ cdn.example.com  │      │                  │
-├──────────┴──────┴──────┴──────────────────┴──────┴──────────────────┤
-│ GET /api/posts?page=2 HTTP/1.1                                      │
-│ Host: example.com                                                   │
-│ Accept: application/json                                            │
-│ → 200 OK (Content-Length: 45231)                                    │
-├─────────────────────────────────────────────────────────────────────┤
-│ q:退出 ↑↓:导航 d:详情 /:过滤 Esc:清除                               │
-└─────────────────────────────────────────────────────────────────────┘
+wirepeek --headless --read capture.pcap --endpoints
+sudo wirepeek --headless -i eth0 --metrics-listen 127.0.0.1:9464
+wirepeek --read capture.pcap --tls-keylog sslkeys.log   # 实验性：仅解析密钥，尚不解密
 ```
 
 ## 架构
 
-```
-  网络 ──→ libpcap ──→ 解析 ──→ TCP 流重组 ──→ 协议检测
-                      (L2-L4)   (重排序/去重)  (HTTP/DNS/TLS/WS)
-                                                    │
-                          ┌──────────────┬──────────┤
-                          ▼              ▼          ▼
-                       分析引擎      TUI/CLI      导出
-                     (T-Digest P95) (FTXUI+过滤) (pcap/HAR/JSON)
-```
+详见[架构与设计文档](docs/zh/architecture.md)。
 
-详见[架构与设计文档](docs/zh/architecture.md)，了解实现细节、设计决策和模块内部原理。
+当前抓包处理与 UI 通过互斥锁共享状态；解析器在 libpcap 缓冲区有效期内使用零拷贝 span。
+吞吐数字请先用[基准测试套件](docs/en/benchmarks.md)测量后再写入宣传材料。
+
+## 版本规划
+
+| 版本线 | 重点 |
+|------|------|
+| **v1.0.x** | 正确性：抓包时间戳、HTTP framing、链路层、DNS/TLS/WS 接线 |
+| **v1.1.x** | APM：端点聚合、时延拆解、Redis、OpenMetrics、benchmark/fuzz |
+| **后续** | 完整 TLS 解密（当前 keylog 为实验性）、更完整 HPACK、MySQL/PostgreSQL |
 
 ## 贡献
 
-欢迎贡献！请：
-
 1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 遵循 [Google C++ 代码规范](https://google.github.io/styleguide/cppguide.html)（C++20 扩展）
-4. 确保所有测试通过 (`ctest --test-dir build`)
-5. 提交 Pull Request
+2. 创建特性分支
+3. 遵循 Google C++ Style（C++20）
+4. 确保 `ctest --test-dir build` 通过
+5. 发版前参考 [docs/en/release-checklist.md](docs/en/release-checklist.md)
+6. 提交 Pull Request
 
 ## 许可证
 

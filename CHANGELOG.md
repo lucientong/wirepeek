@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-09
+
+### Added
+
+- Capture timestamps propagate through TCP reassembly into HTTP/DNS latency and HAR `startedDateTime`.
+- HTTP/1.1 framing: chunked bodies, HEAD/1xx/204/304 no-body semantics, Connection: close bodies, pipelining FIFO.
+- Link-layer dissection for Ethernet, DLT_NULL/LOOP, Linux SLL/SLL2, and raw IP; pcap export writes the real link type.
+- TCP reassembly: partial-retransmit trim, out-of-order memory quota, LRU eviction, periodic idle flush.
+- Unified `AppEvent` pipeline with DNS pairing, TLS handshake summaries (SNI/ALPN), WebSocket frames, Redis RESP, and minimal HTTP/2 / gRPC framing.
+- PassivePM features: normalized endpoint aggregation (`--endpoints`, TUI `e`), timing breakdown fields, OpenMetrics (`--metrics-listen`).
+- Experimental `--tls-keylog` SSLKEYLOGFILE parser (secrets stored; traffic decryption not enabled yet).
+- HAR 1.2 required fields + absolute URLs; safer NDJSON escaping and write-all helpers.
+- Integration pcap fixtures, ASan/UBSan CI job, libFuzzer harnesses, Google Benchmark suite, bounded SPSC queue utility.
+- Release checklist and benchmark docs.
+
+### Fixed
+
+- Statistics sliding window prune + Mbps/QPS rate formulas; TUI no longer snapshots every packet.
+- README over-claims (lock-free / mmap / 10Gbps / unimplemented protocols) replaced with accurate wording.
+
+### Changed
+
+- Default `max_streams` raised to 10 000 with LRU eviction.
+- Project version bumped to 1.1.0.
+
 ## [1.0.0] - 2026-04-22
 
 ### Added
