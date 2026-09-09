@@ -7,10 +7,12 @@
 #pragma once
 
 #include <wirepeek/packet.h>
+#include <wirepeek/analyzer/endpoint_stats.h>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -68,6 +70,16 @@ class UiState {
     return {entries_.begin(), entries_.end()};
   }
 
+  /// Copy a bounded window of entries without snapshotting the full history.
+  std::vector<TuiEntry> GetEntriesSlice(size_t start, size_t count) const {
+    std::lock_guard lock(mutex_);
+    if (start >= entries_.size() || count == 0)
+      return {};
+    const size_t end = std::min(entries_.size(), start + std::min(count, entries_.size() - start));
+    return {entries_.begin() + static_cast<std::ptrdiff_t>(start),
+            entries_.begin() + static_cast<std::ptrdiff_t>(end)};
+  }
+
   /// Get entry count without copying.
   size_t EntryCount() const {
     std::lock_guard lock(mutex_);
@@ -116,6 +128,16 @@ class UiState {
     return s;
   }
 
+  void SetEndpoints(std::vector<analyzer::EndpointSnapshot> endpoints) {
+    std::lock_guard lock(mutex_);
+    endpoints_ = std::move(endpoints);
+  }
+
+  std::vector<analyzer::EndpointSnapshot> GetEndpoints() const {
+    std::lock_guard lock(mutex_);
+    return endpoints_;
+  }
+
   /// Get entries matching a filter string (case-insensitive substring match on
   /// protocol/method/url).
   std::vector<TuiEntry> GetFilteredEntries(const std::string& filter) const {
@@ -145,6 +167,7 @@ class UiState {
 
   mutable std::mutex mutex_;
   std::deque<TuiEntry> entries_;
+  std::vector<analyzer::EndpointSnapshot> endpoints_;
   TuiStats stats_;
   std::deque<int> pps_history_;
 };

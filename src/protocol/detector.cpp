@@ -46,6 +46,13 @@ AppProtocol DetectProtocol(std::span<const uint8_t> data) {
     return AppProtocol::kHttp2;
   }
 
+  // Redis RESP top-level values.
+  if (std::string_view("*+$-:").find(static_cast<char>(data[0])) != std::string_view::npos) {
+    const auto crlf = std::find(data.begin(), data.end(), static_cast<uint8_t>('\r'));
+    if (crlf != data.end())
+      return AppProtocol::kRedis;
+  }
+
   return AppProtocol::kUnknown;
 }
 

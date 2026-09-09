@@ -18,6 +18,6 @@ namespace wirepeek::protocol {
 bool IsWebSocketUpgrade(const HttpRequest& req);
 
 /// Parse a WebSocket frame header.
-std::optional<WsFrameInfo> ParseWsFrame(std::span<const uint8_t> data);
+std::optional<WsFrameInfo> ParseWsFrame(std::span<const uint8_t> data) noexcept;
 
 }  // namespace wirepeek::protocol

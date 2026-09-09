@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -78,12 +79,48 @@ struct HttpResponse {
   Timestamp timestamp;              ///< When the response was first seen.
 };
 
+/// Latency phases that can be measured from passively observed traffic.
+struct TimingBreakdown {
+  std::optional<std::chrono::microseconds> tcp_handshake;
+  std::optional<std::chrono::microseconds> tls_handshake;
+  std::optional<std::chrono::microseconds> ttfb;
+  std::optional<std::chrono::microseconds> transfer;
+};
+
 /// A paired HTTP request and response.
 struct HttpTransaction {
   HttpRequest request;
   HttpResponse response;
   std::chrono::microseconds latency{0};  ///< Time from request to first response byte.
+  TimingBreakdown timing;
   bool complete = false;                 ///< True if both request and response are parsed.
+};
+
+// ── Redis ────────────────────────────────────────────────────────────────────
+
+struct RedisTransaction {
+  std::string command;
+  std::string args_summary;
+  std::string response_summary;
+  std::chrono::microseconds latency{0};
+  Timestamp timestamp;
+  bool error = false;
+  bool complete = false;
+};
+
+// ── HTTP/2 ───────────────────────────────────────────────────────────────────
+
+struct Http2StreamEvent {
+  uint32_t stream_id = 0;
+  uint8_t frame_type = 0;
+  uint8_t flags = 0;
+  size_t payload_size = 0;
+  std::string method;
+  std::string path;
+  uint16_t status = 0;
+  bool grpc = false;
+  std::optional<int> grpc_status;
+  Timestamp timestamp;
 };
 
 // ── DNS ───────────────────────────────────────────────────────────────────────

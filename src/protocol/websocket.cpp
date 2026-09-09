@@ -39,7 +39,7 @@ bool IsWebSocketUpgrade(const HttpRequest& req) {
   return has_upgrade && has_websocket;
 }
 
-std::optional<WsFrameInfo> ParseWsFrame(std::span<const uint8_t> data) {
+std::optional<WsFrameInfo> ParseWsFrame(std::span<const uint8_t> data) noexcept {
   if (data.size() < 2)
     return std::nullopt;
 
