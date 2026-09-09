@@ -9,8 +9,7 @@ namespace wirepeek::protocol {
 namespace {
 
 bool ParseNumber(std::string_view value, int64_t& result) {
-  const auto [ptr, ec] =
-      std::from_chars(value.data(), value.data() + value.size(), result);
+  const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), result);
   return ec == std::errc{} && ptr == value.data() + value.size();
 }
 
@@ -45,8 +44,7 @@ bool RedisParser::ParseValue(std::string_view input, size_t& consumed, Value& va
 
   if (type == '$') {
     const size_t size = static_cast<size_t>(length);
-    if (input.size() < header_size + size + 2 ||
-        input.substr(header_size + size, 2) != "\r\n")
+    if (input.size() < header_size + size + 2 || input.substr(header_size + size, 2) != "\r\n")
       return false;
     value.text = std::string(input.substr(header_size, size));
     consumed = header_size + size + 2;
@@ -130,8 +128,8 @@ void RedisParser::ParseDirection(size_t index, Timestamp timestamp) {
         .command = std::move(pending.command),
         .args_summary = std::move(pending.args),
         .response_summary = Summarize(value),
-        .latency = std::chrono::duration_cast<std::chrono::microseconds>(
-            timestamp - pending.timestamp),
+        .latency =
+            std::chrono::duration_cast<std::chrono::microseconds>(timestamp - pending.timestamp),
         .timestamp = pending.timestamp,
         .error = value.error,
         .complete = true,

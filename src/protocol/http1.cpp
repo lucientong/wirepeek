@@ -4,8 +4,8 @@
 #include <wirepeek/protocol/http1.h>
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <limits>
 #include <string_view>
 
@@ -54,10 +54,8 @@ void Http1Parser::Feed(std::span<const uint8_t> data, StreamDirection dir, Times
   if (data.empty() || upgraded_)
     return;
 
-  auto& buffer =
-      (dir == StreamDirection::kClientToServer) ? request_buffer_ : response_buffer_;
-  auto& state =
-      (dir == StreamDirection::kClientToServer) ? request_state_ : response_state_;
+  auto& buffer = (dir == StreamDirection::kClientToServer) ? request_buffer_ : response_buffer_;
+  auto& state = (dir == StreamDirection::kClientToServer) ? request_state_ : response_state_;
   if (state.state == Http1ParseState::kStartLine && buffer.empty()) {
     state.timestamp = ts;
   }
@@ -89,12 +87,10 @@ void Http1Parser::ParseRequests(Timestamp ts) {
       HeaderInfo info;
       if (!ParseHeaders(request_buffer_, current_request_.headers, info, request_state_))
         return;
-      request_state_.body_mode =
-          info.chunked
-              ? Http1BodyMode::kChunked
-              : (info.content_length && *info.content_length > 0
-                     ? Http1BodyMode::kContentLength
-                     : Http1BodyMode::kNone);
+      request_state_.body_mode = info.chunked ? Http1BodyMode::kChunked
+                                              : (info.content_length && *info.content_length > 0
+                                                     ? Http1BodyMode::kContentLength
+                                                     : Http1BodyMode::kNone);
       request_state_.content_length = info.content_length.value_or(0);
       request_state_.state = Http1ParseState::kBody;
     }
@@ -131,8 +127,8 @@ void Http1Parser::ParseResponses(Timestamp ts) {
       } else if (info.chunked) {
         response_state_.body_mode = Http1BodyMode::kChunked;
       } else if (info.content_length) {
-        response_state_.body_mode = *info.content_length == 0 ? Http1BodyMode::kNone
-                                                              : Http1BodyMode::kContentLength;
+        response_state_.body_mode =
+            *info.content_length == 0 ? Http1BodyMode::kNone : Http1BodyMode::kContentLength;
         response_state_.content_length = *info.content_length;
       } else {
         response_state_.body_mode = Http1BodyMode::kUntilClose;
@@ -224,8 +220,7 @@ bool Http1Parser::ParseHeaders(std::string& buffer, std::vector<HttpHeader>& hea
     return false;
   }
   const size_t consumed_bytes = empty_headers ? 2 : end + 4;
-  if (consumed_bytes > kMaxHeaderBytes ||
-      state.message_bytes > kMaxMessageBytes - consumed_bytes) {
+  if (consumed_bytes > kMaxHeaderBytes || state.message_bytes > kMaxMessageBytes - consumed_bytes) {
     FailDirection(buffer, state);
     return false;
   }
@@ -245,8 +240,7 @@ bool Http1Parser::ParseHeaders(std::string& buffer, std::vector<HttpHeader>& hea
     const auto lower_name = Lower(name);
     if (lower_name == "content-length") {
       size_t parsed = 0;
-      if (!ParseDecimal(value, parsed) ||
-          (info.content_length && *info.content_length != parsed)) {
+      if (!ParseDecimal(value, parsed) || (info.content_length && *info.content_length != parsed)) {
         FailDirection(buffer, state);
         return false;
       }
@@ -256,8 +250,10 @@ bool Http1Parser::ParseHeaders(std::string& buffer, std::vector<HttpHeader>& hea
       size_t token_start = 0;
       while (token_start <= lower_value.size()) {
         const auto comma = lower_value.find(',', token_start);
-        const auto token = Trim(std::string_view(lower_value).substr(
-            token_start, comma == std::string::npos ? std::string::npos : comma - token_start));
+        const auto token =
+            Trim(std::string_view(lower_value)
+                     .substr(token_start,
+                             comma == std::string::npos ? std::string::npos : comma - token_start));
         if (token == "chunked")
           info.chunked = true;
         if (comma == std::string::npos)
@@ -430,8 +426,8 @@ void Http1Parser::FailDirection(std::string& buffer, MessageState& state) {
     current_response_ = HttpResponse{};
 }
 
-bool Http1Parser::HeaderContainsToken(const std::vector<HttpHeader>& headers,
-                                      std::string_view name, std::string_view token) {
+bool Http1Parser::HeaderContainsToken(const std::vector<HttpHeader>& headers, std::string_view name,
+                                      std::string_view token) {
   const auto wanted_name = Lower(name);
   const auto wanted_token = Lower(token);
   for (const auto& [header_name, header_value] : headers) {

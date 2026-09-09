@@ -18,9 +18,9 @@
 #include <memory>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
-#include <utility>
 
 namespace wirepeek::protocol {
 
@@ -78,8 +78,8 @@ class ProtocolHandler {
   void Emit(const ConnectionKey& key, AppEvent event) const;
   void FeedTls(const ConnectionKey& key, TlsStreamState& state, std::span<const uint8_t> data,
                StreamDirection direction, Timestamp ts);
-  void FeedWebSocket(const ConnectionKey& key, WsStreamState& state,
-                     std::span<const uint8_t> data, StreamDirection direction);
+  void FeedWebSocket(const ConnectionKey& key, WsStreamState& state, std::span<const uint8_t> data,
+                     StreamDirection direction);
 
   EventCallback callback_;
   std::unordered_map<ConnectionKey, StreamState> streams_;

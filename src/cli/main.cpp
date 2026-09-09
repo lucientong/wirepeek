@@ -4,10 +4,10 @@
 /// @file cli/main.cpp
 /// @brief Wirepeek CLI entry point.
 
-#include <wirepeek/capture/file_source.h>
 #include <wirepeek/analyzer/endpoint_stats.h>
 #include <wirepeek/analyzer/metrics_server.h>
 #include <wirepeek/analyzer/statistics.h>
+#include <wirepeek/capture/file_source.h>
 #include <wirepeek/capture/pcap_source.h>
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/tcp_reassembler.h>
@@ -118,7 +118,7 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
   // Set up protocol handler.
   auto protocol_handler = std::make_unique<wirepeek::protocol::ProtocolHandler>(
       [&har_writer, &json_writer, &statistics, &endpoints](const wirepeek::ConnectionKey&,
-                                  const wirepeek::AppEvent& event) {
+                                                           const wirepeek::AppEvent& event) {
         std::visit(
             [&](const auto& value) {
               using Event = std::decay_t<decltype(value)>;
@@ -143,9 +143,9 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
                 fmt::print("REDIS {} {} -> {} ({}us)\n", value.command, value.args_summary,
                            value.response_summary, value.latency.count());
               } else if constexpr (std::is_same_v<Event, wirepeek::Http2StreamEvent>) {
-                fmt::print("{} stream={} type={} {} {} status={}\n",
-                           value.grpc ? "gRPC" : "HTTP/2", value.stream_id, value.frame_type,
-                           value.method, value.path, value.status);
+                fmt::print("{} stream={} type={} {} {} status={}\n", value.grpc ? "gRPC" : "HTTP/2",
+                           value.stream_id, value.frame_type, value.method, value.path,
+                           value.status);
               } else if constexpr (std::is_same_v<Event, wirepeek::DnsEvent>) {
                 fmt::print("DNS {} {} -> {} ({}us)\n", wirepeek::DnsTypeName(value.query.type),
                            value.query.name,
@@ -154,8 +154,7 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
                                : "(no answer)",
                            value.latency.count());
               } else if constexpr (std::is_same_v<Event, wirepeek::TlsHandshakeInfo>) {
-                fmt::print("TLS {} {} {}\n",
-                           value.is_client_hello ? "ClientHello" : "ServerHello",
+                fmt::print("TLS {} {} {}\n", value.is_client_hello ? "ClientHello" : "ServerHello",
                            value.sni.empty() ? "-" : value.sni,
                            value.cipher_suite.empty() ? "" : value.cipher_suite);
               }
@@ -228,12 +227,11 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
 
   if (show_endpoints) {
     fmt::print(stderr, "\n--- HTTP endpoints ---\n");
-    fmt::print(stderr, "{:<9} {:<44} {:>8} {:>8} {:>10}\n", "METHOD", "ROUTE", "COUNT",
-               "ERRORS", "P95(ms)");
+    fmt::print(stderr, "{:<9} {:<44} {:>8} {:>8} {:>10}\n", "METHOD", "ROUTE", "COUNT", "ERRORS",
+               "P95(ms)");
     for (const auto& endpoint : endpoints->Snapshot()) {
-      fmt::print(stderr, "{:<9} {:<44} {:>8} {:>8} {:>10.2f}\n", endpoint.method,
-                 endpoint.route, endpoint.count, endpoint.error_count,
-                 endpoint.p95_latency_us / 1000.0);
+      fmt::print(stderr, "{:<9} {:<44} {:>8} {:>8} {:>10.2f}\n", endpoint.method, endpoint.route,
+                 endpoint.count, endpoint.error_count, endpoint.p95_latency_us / 1000.0);
     }
   }
 

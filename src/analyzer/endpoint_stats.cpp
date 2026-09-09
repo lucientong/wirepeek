@@ -11,9 +11,8 @@ namespace wirepeek::analyzer {
 namespace {
 
 bool IsNumeric(std::string_view segment) {
-  return !segment.empty() &&
-         std::all_of(segment.begin(), segment.end(),
-                     [](unsigned char c) { return std::isdigit(c); });
+  return !segment.empty() && std::all_of(segment.begin(), segment.end(),
+                                         [](unsigned char c) { return std::isdigit(c); });
 }
 
 bool IsUuid(std::string_view segment) {
@@ -74,14 +73,12 @@ void EndpointStats::Record(const HttpTransaction& transaction) {
   aggregate.latencies.Add(static_cast<double>(transaction.latency.count()));
 
   if (slow_top_n_ > 0) {
-    aggregate.slow_requests.push_back(
-        {.latency_us = transaction.latency.count(),
-         .status = transaction.response.status_code,
-         .timestamp = transaction.request.timestamp});
-    std::sort(aggregate.slow_requests.begin(), aggregate.slow_requests.end(),
-              [](const SlowRequest& a, const SlowRequest& b) {
-                return a.latency_us > b.latency_us;
-              });
+    aggregate.slow_requests.push_back({.latency_us = transaction.latency.count(),
+                                       .status = transaction.response.status_code,
+                                       .timestamp = transaction.request.timestamp});
+    std::sort(
+        aggregate.slow_requests.begin(), aggregate.slow_requests.end(),
+        [](const SlowRequest& a, const SlowRequest& b) { return a.latency_us > b.latency_us; });
     if (aggregate.slow_requests.size() > slow_top_n_)
       aggregate.slow_requests.resize(slow_top_n_);
   }

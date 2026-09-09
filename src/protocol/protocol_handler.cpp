@@ -27,15 +27,17 @@ bool IsReverseFlow(const ConnectionKey& query, const ConnectionKey& response) {
 
 bool CouldBeKnownProtocolPrefix(std::span<const uint8_t> data) {
   static constexpr std::array<std::string_view, 12> kPrefixes = {
-      "GET ",     "POST ",    "PUT ",   "DELETE ", "HEAD ",  "OPTIONS ",
-      "PATCH ",   "CONNECT ", "TRACE ", "HTTP/",   "PRI * HTTP/2", "\x16\x03"};
-  return std::any_of(kPrefixes.begin(), kPrefixes.end(), [data](std::string_view prefix) {
-    return data.size() < prefix.size() &&
-           std::equal(data.begin(), data.end(),
-                      reinterpret_cast<const uint8_t*>(prefix.data()));
-  }) || (data.size() < 3 && !data.empty() &&
-         std::string_view("*+$-:").find(static_cast<char>(data.front())) !=
-             std::string_view::npos);
+      "GET ",   "POST ",    "PUT ",   "DELETE ", "HEAD ",        "OPTIONS ",
+      "PATCH ", "CONNECT ", "TRACE ", "HTTP/",   "PRI * HTTP/2", "\x16\x03"};
+  return std::any_of(kPrefixes.begin(), kPrefixes.end(),
+                     [data](std::string_view prefix) {
+                       return data.size() < prefix.size() &&
+                              std::equal(data.begin(), data.end(),
+                                         reinterpret_cast<const uint8_t*>(prefix.data()));
+                     }) ||
+         (data.size() < 3 && !data.empty() &&
+          std::string_view("*+$-:").find(static_cast<char>(data.front())) !=
+              std::string_view::npos);
 }
 
 size_t WsFrameSize(std::span<const uint8_t> data, const WsFrameInfo& frame) {
@@ -58,9 +60,8 @@ ProtocolHandler::ProtocolHandler(EventCallback callback) : callback_(std::move(c
 
 ProtocolHandler::ProtocolHandler(HttpCallback http_callback, RawDataCallback raw_callback)
     : ProtocolHandler(
-          [http_callback = std::move(http_callback),
-           raw_callback = std::move(raw_callback)](const ConnectionKey& key,
-                                                   const AppEvent& event) {
+          [http_callback = std::move(http_callback), raw_callback = std::move(raw_callback)](
+              const ConnectionKey& key, const AppEvent& event) {
             if (const auto* transaction = std::get_if<HttpTransaction>(&event)) {
               if (http_callback)
                 http_callback(key, *transaction);
@@ -107,8 +108,7 @@ void ProtocolHandler::FeedTls(const ConnectionKey& key, TlsStreamState& state,
 }
 
 void ProtocolHandler::FeedWebSocket(const ConnectionKey& key, WsStreamState& state,
-                                    std::span<const uint8_t> data,
-                                    StreamDirection direction) {
+                                    std::span<const uint8_t> data, StreamDirection direction) {
   auto& buffer = state.buffers[DirectionIndex(direction)];
   buffer.insert(buffer.end(), data.begin(), data.end());
   if (buffer.size() > 64 * 1024 * 1024) {
@@ -216,11 +216,9 @@ void ProtocolHandler::OnStreamEvent(const dissector::StreamEvent& event, Timesta
     case dissector::StreamEventType::kClose: {
       auto it = streams_.find(event.key);
       if (it != streams_.end()) {
-        if (auto* parser =
-                std::get_if<std::unique_ptr<Http1Parser>>(&it->second.parser))
+        if (auto* parser = std::get_if<std::unique_ptr<Http1Parser>>(&it->second.parser))
           (*parser)->OnClose();
-        else if (auto* parser =
-                     std::get_if<std::unique_ptr<RedisParser>>(&it->second.parser))
+        else if (auto* parser = std::get_if<std::unique_ptr<RedisParser>>(&it->second.parser))
           (*parser)->OnClose();
         streams_.erase(it);
       }
@@ -252,18 +250,16 @@ void ProtocolHandler::OnUdpPayload(const ConnectionKey& key, std::span<const uin
   if (pending_it == pending_dns_.end())
     return;
   auto& candidates = pending_it->second;
-  auto match = std::find_if(candidates.begin(), candidates.end(),
-                            [&key](const PendingDns& item) {
-                              return IsReverseFlow(item.key, key);
-                            });
+  auto match = std::find_if(candidates.begin(), candidates.end(), [&key](const PendingDns& item) {
+    return IsReverseFlow(item.key, key);
+  });
   if (match == candidates.end())
     return;
 
   DnsEvent event;
   event.query = match->query;
   event.response = std::move(*response);
-  event.latency =
-      std::chrono::duration_cast<std::chrono::microseconds>(ts - event.query.timestamp);
+  event.latency = std::chrono::duration_cast<std::chrono::microseconds>(ts - event.query.timestamp);
   event.complete = true;
   const ConnectionKey query_key = match->key;
   candidates.erase(match);

@@ -136,8 +136,8 @@ void TcpReassembler::HandleSyn(TcpStream& stream, const DissectedPacket& packet,
     } else if (is_syn_ack) {
       stream.state = TcpStreamState::kEstablished;
       if (stream.syn_timestamp)
-        stream.tcp_handshake = std::chrono::duration_cast<std::chrono::microseconds>(
-            ts - *stream.syn_timestamp);
+        stream.tcp_handshake =
+            std::chrono::duration_cast<std::chrono::microseconds>(ts - *stream.syn_timestamp);
       stream.halves[dir].initial_seq = tcp.seq_num;
       stream.halves[dir].next_expected_seq = tcp.seq_num + 1;
       stream.halves[dir].seq_initialized = true;

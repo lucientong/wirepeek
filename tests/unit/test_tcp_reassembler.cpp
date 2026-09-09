@@ -60,9 +60,8 @@ class TcpReassemblerTest : public ::testing::Test {
     events.clear();
     return std::make_unique<TcpReassembler>(
         [this](const StreamEvent& e) {
-          events.push_back(
-              {e.type, e.direction, std::vector<uint8_t>(e.data.begin(), e.data.end()),
-               e.timestamp});
+          events.push_back({e.type, e.direction, std::vector<uint8_t>(e.data.begin(), e.data.end()),
+                            e.timestamp});
         },
         config);
   }

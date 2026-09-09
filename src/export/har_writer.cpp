@@ -30,10 +30,9 @@ static bool EqualsIgnoreCase(std::string_view lhs, std::string_view rhs) {
 static std::string AbsoluteUrl(const HttpRequest& request) {
   if (request.url.starts_with("http://") || request.url.starts_with("https://"))
     return request.url;
-  auto host = std::find_if(request.headers.begin(), request.headers.end(),
-                           [](const HttpHeader& header) {
-                             return EqualsIgnoreCase(header.first, "host");
-                           });
+  auto host =
+      std::find_if(request.headers.begin(), request.headers.end(),
+                   [](const HttpHeader& header) { return EqualsIgnoreCase(header.first, "host"); });
   if (host == request.headers.end())
     return request.url;
   return "http://" + host->second +
@@ -99,17 +98,15 @@ std::string HarWriter::ToJson() const {
                           EscapeJson(txn.response.headers[h].second));
     }
     json += "],\n";
-    json += fmt::format(
-        "          \"content\": {{ \"size\": {}, \"mimeType\": \"\" }},\n",
-        txn.response.body_size);
+    json += fmt::format("          \"content\": {{ \"size\": {}, \"mimeType\": \"\" }},\n",
+                        txn.response.body_size);
     json += "          \"redirectURL\": \"\",\n";
     json += "          \"headersSize\": -1,\n";
     json += fmt::format("          \"bodySize\": {}\n", txn.response.body_size);
     json += "        },\n";
     json += "        \"cache\": {},\n";
-    json += fmt::format(
-        "        \"timings\": {{ \"send\": 0, \"wait\": {}, \"receive\": 0 }}\n",
-        time_ms);
+    json += fmt::format("        \"timings\": {{ \"send\": 0, \"wait\": {}, \"receive\": 0 }}\n",
+                        time_ms);
 
     json += "      }";
     if (i + 1 < transactions_.size())

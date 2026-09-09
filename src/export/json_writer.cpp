@@ -100,8 +100,8 @@ void JsonWriter::WriteHttpTransaction(const HttpTransaction& txn) {
       "\"status\":{},\"latency_us\":{},\"req_body_size\":{},\"resp_body_size\":{},"
       "\"complete\":{}",
       epoch_us, EscapeJson(txn.request.method), EscapeJson(txn.request.url),
-      txn.response.status_code,
-      latency_us, txn.request.body_size, txn.response.body_size, txn.complete ? "true" : "false");
+      txn.response.status_code, latency_us, txn.request.body_size, txn.response.body_size,
+      txn.complete ? "true" : "false");
   if (txn.timing.tcp_handshake)
     json += fmt::format(",\"tcp_handshake_us\":{}", txn.timing.tcp_handshake->count());
   if (txn.timing.tls_handshake)

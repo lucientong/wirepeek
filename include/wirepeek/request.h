@@ -93,7 +93,7 @@ struct HttpTransaction {
   HttpResponse response;
   std::chrono::microseconds latency{0};  ///< Time from request to first response byte.
   TimingBreakdown timing;
-  bool complete = false;                 ///< True if both request and response are parsed.
+  bool complete = false;  ///< True if both request and response are parsed.
 };
 
 // ── Redis ────────────────────────────────────────────────────────────────────

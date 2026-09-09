@@ -46,19 +46,32 @@ bool DecodeString(std::span<const uint8_t> input, size_t& offset, std::string& v
 
 std::pair<std::string_view, std::string_view> StaticHeader(uint32_t index) {
   switch (index) {
-    case 2: return {":method", "GET"};
-    case 3: return {":method", "POST"};
-    case 4: return {":path", "/"};
-    case 5: return {":path", "/index.html"};
-    case 8: return {":status", "200"};
-    case 9: return {":status", "204"};
-    case 10: return {":status", "206"};
-    case 11: return {":status", "304"};
-    case 12: return {":status", "400"};
-    case 13: return {":status", "404"};
-    case 14: return {":status", "500"};
-    case 31: return {"content-type", ""};
-    default: return {};
+    case 2:
+      return {":method", "GET"};
+    case 3:
+      return {":method", "POST"};
+    case 4:
+      return {":path", "/"};
+    case 5:
+      return {":path", "/index.html"};
+    case 8:
+      return {":status", "200"};
+    case 9:
+      return {":status", "204"};
+    case 10:
+      return {":status", "206"};
+    case 11:
+      return {":status", "304"};
+    case 12:
+      return {":status", "400"};
+    case 13:
+      return {":status", "404"};
+    case 14:
+      return {":status", "500"};
+    case 31:
+      return {"content-type", ""};
+    default:
+      return {};
   }
 }
 
@@ -101,10 +114,9 @@ void Http2Parser::ParseFrames(size_t index, Timestamp timestamp) {
       return;
     const uint8_t type = buffer[3];
     const uint8_t flags = buffer[4];
-    const uint32_t stream_id =
-        ((static_cast<uint32_t>(buffer[5]) & 0x7f) << 24) |
-        (static_cast<uint32_t>(buffer[6]) << 16) |
-        (static_cast<uint32_t>(buffer[7]) << 8) | buffer[8];
+    const uint32_t stream_id = ((static_cast<uint32_t>(buffer[5]) & 0x7f) << 24) |
+                               (static_cast<uint32_t>(buffer[6]) << 16) |
+                               (static_cast<uint32_t>(buffer[7]) << 8) | buffer[8];
     std::span<const uint8_t> payload(buffer.data() + 9, length);
 
     if (type == 1 && stream_id != 0) {

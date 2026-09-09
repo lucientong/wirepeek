@@ -146,7 +146,7 @@ jobs:
         run: |
           for target in ethernet ip tcp udp dns tls websocket http1; do
             "build-fuzz/tests/fuzz/fuzz_${target}" \
-              "tests/fuzz/corpus/${target}" -runs=1000 -max_total_time=5
+              "tests/fuzz/corpus/${target}" -runs=1000 -timeout=5
           done
 
   lint:

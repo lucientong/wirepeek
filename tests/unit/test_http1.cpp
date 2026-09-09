@@ -178,10 +178,12 @@ TEST_F(Http1ParserTest, Http404Response) {
 
 TEST_F(Http1ParserTest, ParsesPipelinedMessagesInSingleFeeds) {
   auto parser = MakeParser();
-  auto requests = ToBytes("GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
-                          "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
-  auto responses = ToBytes("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nA"
-                           "HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nBC");
+  auto requests = ToBytes(
+      "GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
+      "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto responses = ToBytes(
+      "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nA"
+      "HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nBC");
 
   parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
   parser->Feed(responses, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
@@ -198,8 +200,7 @@ TEST_F(Http1ParserTest, ParsesChunkedRequestAndResponseIncrementally) {
   auto parser = MakeParser();
   auto request1 = ToBytes("POST /upload HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWi");
   auto request2 = ToBytes("ki\r\n5;ext=yes\r\npedia\r\n0\r\nX-Trailer: yes\r\n\r\n");
-  auto response1 =
-      ToBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n");
+  auto response1 = ToBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n");
   auto response2 = ToBytes("2\r\nde\r\n0\r\n\r\n");
 
   parser->Feed(request1, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
@@ -214,12 +215,14 @@ TEST_F(Http1ParserTest, ParsesChunkedRequestAndResponseIncrementally) {
 
 TEST_F(Http1ParserTest, HeadAndBodylessStatusesIgnoreContentLength) {
   auto parser = MakeParser();
-  auto requests = ToBytes("HEAD /head HTTP/1.1\r\nHost: x\r\n\r\n"
-                          "GET /empty HTTP/1.1\r\nHost: x\r\n\r\n"
-                          "GET /cached HTTP/1.1\r\nHost: x\r\n\r\n");
-  auto responses = ToBytes("HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n"
-                           "HTTP/1.1 204 No Content\r\nContent-Length: 88\r\n\r\n"
-                           "HTTP/1.1 304 Not Modified\r\nContent-Length: 77\r\n\r\n");
+  auto requests = ToBytes(
+      "HEAD /head HTTP/1.1\r\nHost: x\r\n\r\n"
+      "GET /empty HTTP/1.1\r\nHost: x\r\n\r\n"
+      "GET /cached HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto responses = ToBytes(
+      "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n"
+      "HTTP/1.1 204 No Content\r\nContent-Length: 88\r\n\r\n"
+      "HTTP/1.1 304 Not Modified\r\nContent-Length: 77\r\n\r\n");
 
   parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
   parser->Feed(responses, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
@@ -233,8 +236,9 @@ TEST_F(Http1ParserTest, HeadAndBodylessStatusesIgnoreContentLength) {
 TEST_F(Http1ParserTest, InformationalResponseDoesNotConsumeRequest) {
   auto parser = MakeParser();
   auto req = ToBytes("POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
-  auto resp = ToBytes("HTTP/1.1 100 Continue\r\n\r\n"
-                      "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+  auto resp = ToBytes(
+      "HTTP/1.1 100 Continue\r\n\r\n"
+      "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
 
   parser->Feed(req, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
   parser->Feed(resp, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
@@ -280,8 +284,9 @@ TEST_F(Http1ParserTest, SwitchingProtocolsEmitsThenSignalsUpgrade) {
 
 TEST_F(Http1ParserTest, OnCloseEmitsEveryPendingPipelinedRequest) {
   auto parser = MakeParser();
-  auto requests = ToBytes("GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
-                          "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto requests = ToBytes(
+      "GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
+      "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
   parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
 
   parser->OnClose();

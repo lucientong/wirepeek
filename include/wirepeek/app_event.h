@@ -36,8 +36,7 @@ struct RawFlowEvent {
   AppProtocol protocol = AppProtocol::kUnknown;
 };
 
-using AppEvent =
-    std::variant<HttpTransaction, RedisTransaction, Http2StreamEvent, DnsEvent, TlsHandshakeInfo,
-                 WebSocketEvent, RawFlowEvent>;
+using AppEvent = std::variant<HttpTransaction, RedisTransaction, Http2StreamEvent, DnsEvent,
+                              TlsHandshakeInfo, WebSocketEvent, RawFlowEvent>;
 
 }  // namespace wirepeek

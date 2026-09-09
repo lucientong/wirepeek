@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include <wirepeek/packet.h>
 #include <wirepeek/analyzer/endpoint_stats.h>
+#include <wirepeek/packet.h>
 
 #include <algorithm>
 #include <cctype>

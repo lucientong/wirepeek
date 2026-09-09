@@ -61,8 +61,8 @@ struct HalfStream {
   uint32_t next_expected_seq = 0;
   bool seq_initialized = false;
   bool fin_seen = false;
-  size_t total_bytes = 0;       ///< Delivered in-order bytes.
-  size_t buffered_bytes = 0;    ///< Bytes currently held in out_of_order.
+  size_t total_bytes = 0;     ///< Delivered in-order bytes.
+  size_t buffered_bytes = 0;  ///< Bytes currently held in out_of_order.
   std::map<uint32_t, BufferedSegment> out_of_order;
 };
 
@@ -102,9 +102,7 @@ class TcpReassembler {
   void Emit(const TcpStream& stream, int dir, StreamEventType type, std::span<const uint8_t> data,
             Timestamp ts);
   static bool SeqBefore(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) < 0; }
-  static bool SeqBeforeOrEqual(uint32_t a, uint32_t b) {
-    return static_cast<int32_t>(a - b) <= 0;
-  }
+  static bool SeqBeforeOrEqual(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) <= 0; }
 
   std::unordered_map<ConnectionKey, TcpStream> streams_;
   std::list<ConnectionKey> lru_;

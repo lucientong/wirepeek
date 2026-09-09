@@ -448,19 +448,17 @@ TEST(ProtocolHandlerTest, RoutesTlsHandshakeWithoutRawDataSpam) {
       [&](const ConnectionKey&, const AppEvent& event) { events.push_back(event); });
   auto key = MakeConnectionKey(MakeIpv4(10, 0, 0, 1), 443, MakeIpv4(10, 0, 0, 2), 50000);
 
-  std::vector<uint8_t> server_hello = {0x16, 0x03, 0x03, 0x00, 0x2a,
-                                       0x02, 0x00, 0x00, 0x26, 0x03, 0x03};
+  std::vector<uint8_t> server_hello = {0x16, 0x03, 0x03, 0x00, 0x2a, 0x02,
+                                       0x00, 0x00, 0x26, 0x03, 0x03};
   server_hello.insert(server_hello.end(), 32, 0xbb);
   server_hello.insert(server_hello.end(), {0x00, 0xc0, 0x2f, 0x00});
-  handler.OnStreamEvent(
-      MakeStreamEvent(key, dissector::StreamEventType::kData, server_hello,
-                      StreamDirection::kServerToClient),
-      MakeTs(1));
-  handler.OnStreamEvent(
-      MakeStreamEvent(key, dissector::StreamEventType::kData,
-                      std::vector<uint8_t>{0x17, 0x03, 0x03, 0x00, 0x01, 0x00},
-                      StreamDirection::kServerToClient),
-      MakeTs(2));
+  handler.OnStreamEvent(MakeStreamEvent(key, dissector::StreamEventType::kData, server_hello,
+                                        StreamDirection::kServerToClient),
+                        MakeTs(1));
+  handler.OnStreamEvent(MakeStreamEvent(key, dissector::StreamEventType::kData,
+                                        std::vector<uint8_t>{0x17, 0x03, 0x03, 0x00, 0x01, 0x00},
+                                        StreamDirection::kServerToClient),
+                        MakeTs(2));
 
   ASSERT_EQ(events.size(), 1u);
   const auto* tls = std::get_if<TlsHandshakeInfo>(&events.front());
@@ -472,21 +470,17 @@ TEST(ProtocolHandlerTest, PairsDnsQueryAndResponse) {
   std::vector<AppEvent> events;
   ProtocolHandler handler(
       [&](const ConnectionKey&, const AppEvent& event) { events.push_back(event); });
-  auto query_key =
-      MakeConnectionKey(MakeIpv4(10, 0, 0, 2), 53000, MakeIpv4(8, 8, 8, 8), 53);
+  auto query_key = MakeConnectionKey(MakeIpv4(10, 0, 0, 2), 53000, MakeIpv4(8, 8, 8, 8), 53);
   query_key.protocol = 17;
-  auto response_key =
-      MakeConnectionKey(MakeIpv4(8, 8, 8, 8), 53, MakeIpv4(10, 0, 0, 2), 53000);
+  auto response_key = MakeConnectionKey(MakeIpv4(8, 8, 8, 8), 53, MakeIpv4(10, 0, 0, 2), 53000);
   response_key.protocol = 17;
-  std::vector<uint8_t> query = {
-      0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x07, 'e',  'x',  'a',  'm',  'p',  'l',  'e',  0x03, 'c',  'o',  'm',
-      0x00, 0x00, 0x01, 0x00, 0x01};
+  std::vector<uint8_t> query = {0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x07, 'e',  'x',  'a',  'm',  'p',  'l',  'e',
+                                0x03, 'c',  'o',  'm',  0x00, 0x00, 0x01, 0x00, 0x01};
   std::vector<uint8_t> response = {
-      0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-      0x07, 'e',  'x',  'a',  'm',  'p',  'l',  'e',  0x03, 'c',  'o',  'm',
-      0x00, 0x00, 0x01, 0x00, 0x01, 0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01,
-      0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 93,   184,  216,  34};
+      0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x07, 'e',  'x',
+      'a',  'm',  'p',  'l',  'e',  0x03, 'c',  'o',  'm',  0x00, 0x00, 0x01, 0x00, 0x01, 0xc0,
+      0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 93,   184,  216,  34};
 
   handler.OnUdpPayload(query_key, query, MakeTs(5));
   EXPECT_TRUE(events.empty());
@@ -505,23 +499,21 @@ TEST(ProtocolHandlerTest, SwitchesHttpUpgradeToWebSocketFrames) {
   ProtocolHandler handler(
       [&](const ConnectionKey&, const AppEvent& event) { events.push_back(event); });
   auto key = MakeConnectionKey(MakeIpv4(10, 0, 0, 1), 50000, MakeIpv4(10, 0, 0, 2), 80);
-  auto request = ToBytes("GET /ws HTTP/1.1\r\nHost: example.com\r\n"
-                         "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
-  auto response =
-      ToBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
-              "Connection: Upgrade\r\n\r\n");
-  handler.OnStreamEvent(
-      MakeStreamEvent(key, dissector::StreamEventType::kData, request,
-                      StreamDirection::kClientToServer),
-      MakeTs(1));
-  handler.OnStreamEvent(
-      MakeStreamEvent(key, dissector::StreamEventType::kData, response,
-                      StreamDirection::kServerToClient),
-      MakeTs(2));
+  auto request = ToBytes(
+      "GET /ws HTTP/1.1\r\nHost: example.com\r\n"
+      "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+  auto response = ToBytes(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+      "Connection: Upgrade\r\n\r\n");
+  handler.OnStreamEvent(MakeStreamEvent(key, dissector::StreamEventType::kData, request,
+                                        StreamDirection::kClientToServer),
+                        MakeTs(1));
+  handler.OnStreamEvent(MakeStreamEvent(key, dissector::StreamEventType::kData, response,
+                                        StreamDirection::kServerToClient),
+                        MakeTs(2));
   handler.OnStreamEvent(
       MakeStreamEvent(key, dissector::StreamEventType::kData,
-                      std::vector<uint8_t>{0x81, 0x02, 'o', 'k'},
-                      StreamDirection::kServerToClient),
+                      std::vector<uint8_t>{0x81, 0x02, 'o', 'k'}, StreamDirection::kServerToClient),
       MakeTs(3));
 
   ASSERT_EQ(events.size(), 2u);

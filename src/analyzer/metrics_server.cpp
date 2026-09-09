@@ -4,14 +4,13 @@
 #include <wirepeek/analyzer/metrics_server.h>
 
 #include <arpa/inet.h>
-#include <fmt/format.h>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <cerrno>
 #include <cstring>
+#include <fmt/format.h>
+#include <netdb.h>
 #include <string_view>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace wirepeek::analyzer {
 namespace {
@@ -150,8 +149,8 @@ void MetricsServer::Serve() {
     char request[4096];
     const ssize_t received = ::recv(client, request, sizeof(request), 0);
     const bool metrics =
-        received > 0 && std::string_view(request, static_cast<size_t>(received)).starts_with(
-                            "GET /metrics ");
+        received > 0 &&
+        std::string_view(request, static_cast<size_t>(received)).starts_with("GET /metrics ");
     const std::string body = metrics ? Render() : "not found\n";
     const std::string response = fmt::format(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

@@ -79,8 +79,7 @@ StatsSnapshot Statistics::Snapshot(std::optional<Timestamp> now) {
   }
 
   const double window_seconds = std::chrono::duration<double>(kWindowDuration).count();
-  snap.throughput_mbps =
-      static_cast<double>(window_bytes_) * 8.0 / window_seconds / 1'000'000.0;
+  snap.throughput_mbps = static_cast<double>(window_bytes_) * 8.0 / window_seconds / 1'000'000.0;
 
   snap.qps = static_cast<double>(txn_timestamps_.size()) / window_seconds;
 

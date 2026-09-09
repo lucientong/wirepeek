@@ -13,8 +13,8 @@ TEST(Http2ParserTest, ReadsFrameAndPlainHpackHeaders) {
   const std::string preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
   std::vector<uint8_t> bytes(preface.begin(), preface.end());
   const std::vector<uint8_t> block = {0x82, 0x04, 0x06, '/', 'u', 's', 'e', 'r', 's'};
-  bytes.insert(bytes.end(), {0x00, 0x00, static_cast<uint8_t>(block.size()), 0x01, 0x04,
-                             0x00, 0x00, 0x00, 0x01});
+  bytes.insert(bytes.end(), {0x00, 0x00, static_cast<uint8_t>(block.size()), 0x01, 0x04, 0x00, 0x00,
+                             0x00, 0x01});
   bytes.insert(bytes.end(), block.begin(), block.end());
 
   parser.Feed(bytes, wirepeek::StreamDirection::kClientToServer, {});

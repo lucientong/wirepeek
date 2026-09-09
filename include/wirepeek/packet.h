@@ -18,12 +18,12 @@ using Timestamp = std::chrono::time_point<std::chrono::system_clock, std::chrono
 
 /// Link-layer type, matching libpcap DLT_* values we support.
 enum class LinkType : uint32_t {
-  kNull = 0,       ///< BSD loopback (DLT_NULL).
-  kEthernet = 1,   ///< Ethernet (DLT_EN10MB).
-  kRaw = 12,       ///< Raw IP (DLT_RAW).
-  kLoop = 108,     ///< OpenBSD loopback (DLT_LOOP).
-  kLinuxSll = 113, ///< Linux cooked capture v1 (DLT_LINUX_SLL).
-  kLinuxSll2 = 276,///< Linux cooked capture v2 (DLT_LINUX_SLL2).
+  kNull = 0,         ///< BSD loopback (DLT_NULL).
+  kEthernet = 1,     ///< Ethernet (DLT_EN10MB).
+  kRaw = 12,         ///< Raw IP (DLT_RAW).
+  kLoop = 108,       ///< OpenBSD loopback (DLT_LOOP).
+  kLinuxSll = 113,   ///< Linux cooked capture v1 (DLT_LINUX_SLL).
+  kLinuxSll2 = 276,  ///< Linux cooked capture v2 (DLT_LINUX_SLL2).
   kUnknown = 0xFFFFFFFFu,
 };
 
@@ -32,10 +32,10 @@ enum class LinkType : uint32_t {
 /// This is the hot-path type — used during capture and dissection. It holds a
 /// pointer into the pcap ring buffer and must not outlive the buffer.
 struct PacketView {
-  std::span<const uint8_t> data;  ///< Raw packet bytes (zero-copy into capture buffer).
-  Timestamp timestamp;            ///< Capture timestamp.
-  uint32_t capture_length = 0;    ///< Number of bytes actually captured.
-  uint32_t original_length = 0;   ///< Original packet length on the wire.
+  std::span<const uint8_t> data;             ///< Raw packet bytes (zero-copy into capture buffer).
+  Timestamp timestamp;                       ///< Capture timestamp.
+  uint32_t capture_length = 0;               ///< Number of bytes actually captured.
+  uint32_t original_length = 0;              ///< Original packet length on the wire.
   LinkType link_type = LinkType::kEthernet;  ///< Link-layer encapsulation.
 };
 

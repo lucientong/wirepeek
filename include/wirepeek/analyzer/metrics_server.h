@@ -15,8 +15,7 @@ namespace wirepeek::analyzer {
 
 class MetricsServer {
  public:
-  MetricsServer(std::shared_ptr<Statistics> statistics,
-                std::shared_ptr<EndpointStats> endpoints);
+  MetricsServer(std::shared_ptr<Statistics> statistics, std::shared_ptr<EndpointStats> endpoints);
   ~MetricsServer();
 
   bool Start(const std::string& address, std::string* error = nullptr);

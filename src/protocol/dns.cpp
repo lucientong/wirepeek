@@ -24,6 +24,7 @@ std::pair<std::string, size_t> ParseDnsName(std::span<const uint8_t> data, size_
   size_t consumed = 0;
   bool jumped = false;
   size_t pos = offset;
+  int pointer_jumps = 0;
 
   while (pos < data.size()) {
     uint8_t len = data[pos];
@@ -38,18 +39,27 @@ std::pair<std::string, size_t> ParseDnsName(std::span<const uint8_t> data, size_
     if ((len & 0xC0) == 0xC0) {
       // Compression pointer.
       if (pos + 1 >= data.size())
-        break;
+        return {"", 0};
       if (!jumped)
         consumed = pos - offset + 2;
       uint16_t ptr = ((len & 0x3F) << 8) | data[pos + 1];
+      if (ptr >= data.size() || ++pointer_jumps > max_depth)
+        return {"", 0};
       pos = ptr;
       jumped = true;
       continue;
     }
 
+    // The top two bits are reserved for label encodings. Plain labels are
+    // limited to 63 bytes by RFC 1035.
+    if ((len & 0xC0) != 0 || len > 63)
+      return {"", 0};
+
     // Regular label.
     if (pos + 1 + len > data.size())
-      break;
+      return {"", 0};
+    if (name.size() + len + (name.empty() ? 0 : 1) > 255)
+      return {"", 0};
     if (!name.empty())
       name += '.';
     name.append(reinterpret_cast<const char*>(data.data() + pos + 1), len);

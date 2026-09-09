@@ -94,6 +94,20 @@ TEST(DnsTest, TruncatedPacket) {
   EXPECT_FALSE(ParseDnsResponse(pkt).has_value());
 }
 
+TEST(DnsTest, RejectsCompressionPointerCycle) {
+  std::vector<uint8_t> pkt = {
+      0x12, 0x34,              // ID
+      0x81, 0x80,              // Response flags
+      0x00, 0x01,              // QDCOUNT = 1
+      0x00, 0x00,              // ANCOUNT = 0
+      0x00, 0x00, 0x00, 0x00,  // NSCOUNT / ARCOUNT
+      0xC0, 0x0C,              // Question name points to itself
+      0x00, 0x01, 0x00, 0x01,  // QTYPE A / QCLASS IN
+  };
+
+  EXPECT_FALSE(ParseDnsResponse(pkt).has_value());
+}
+
 TEST(DnsTest, LooksDnsShaped) {
   auto query = MakeDnsQuery();
   EXPECT_TRUE(LooksDnsShaped(query));
