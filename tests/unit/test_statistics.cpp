@@ -69,6 +69,31 @@ TEST(StatisticsTest, RecordPacketThroughput) {
   EXPECT_NEAR(snap.throughput_mbps, 8.0, 0.1);
 }
 
+TEST(StatisticsTest, SnapshotPrunesExpiredThroughputSamples) {
+  Statistics stats;
+  stats.RecordPacket(1'000'000, MakeTs(100));
+  stats.RecordPacket(500'000, MakeTs(101));
+
+  auto active = stats.Snapshot(MakeTs(101));
+  EXPECT_NEAR(active.throughput_mbps, 12.0, 0.1);
+
+  auto expired = stats.Snapshot(MakeTs(103));
+  EXPECT_DOUBLE_EQ(expired.throughput_mbps, 0.0);
+}
+
+TEST(StatisticsTest, QpsUsesSlidingTimeWindow) {
+  Statistics stats;
+  for (int i = 0; i < 3; ++i) {
+    wirepeek::HttpTransaction txn;
+    txn.complete = true;
+    txn.response.timestamp = MakeTs(10);
+    stats.RecordHttpTransaction(txn);
+  }
+
+  EXPECT_DOUBLE_EQ(stats.Snapshot(MakeTs(10)).qps, 3.0);
+  EXPECT_DOUBLE_EQ(stats.Snapshot(MakeTs(12)).qps, 0.0);
+}
+
 TEST(StatisticsTest, StreamTracking) {
   Statistics stats;
 

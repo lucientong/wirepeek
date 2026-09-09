@@ -140,7 +140,10 @@ TEST_F(Http1ParserTest, ResponseWithoutContentLength) {
   parser->Feed(req, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
   parser->Feed(resp, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
 
+  EXPECT_TRUE(transactions.empty());
+  parser->OnClose();
   ASSERT_EQ(transactions.size(), 1u);
+  EXPECT_TRUE(transactions[0].complete);
   EXPECT_EQ(transactions[0].response.status_code, 200);
   EXPECT_EQ(transactions[0].response.body_size, 0u);
 }
@@ -171,6 +174,122 @@ TEST_F(Http1ParserTest, Http404Response) {
   EXPECT_EQ(transactions[0].response.status_code, 404);
   EXPECT_EQ(transactions[0].response.reason, "Not Found");
   EXPECT_EQ(transactions[0].response.body_size, 9u);
+}
+
+TEST_F(Http1ParserTest, ParsesPipelinedMessagesInSingleFeeds) {
+  auto parser = MakeParser();
+  auto requests = ToBytes("GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
+                          "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto responses = ToBytes("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nA"
+                           "HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nBC");
+
+  parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(responses, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
+
+  ASSERT_EQ(transactions.size(), 2u);
+  EXPECT_EQ(transactions[0].request.url, "/one");
+  EXPECT_EQ(transactions[0].response.body_size, 1u);
+  EXPECT_EQ(transactions[1].request.url, "/two");
+  EXPECT_EQ(transactions[1].response.status_code, 201);
+  EXPECT_EQ(transactions[1].response.body_size, 2u);
+}
+
+TEST_F(Http1ParserTest, ParsesChunkedRequestAndResponseIncrementally) {
+  auto parser = MakeParser();
+  auto request1 = ToBytes("POST /upload HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWi");
+  auto request2 = ToBytes("ki\r\n5;ext=yes\r\npedia\r\n0\r\nX-Trailer: yes\r\n\r\n");
+  auto response1 =
+      ToBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n");
+  auto response2 = ToBytes("2\r\nde\r\n0\r\n\r\n");
+
+  parser->Feed(request1, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(request2, wirepeek::StreamDirection::kClientToServer, MakeTs(2));
+  parser->Feed(response1, wirepeek::StreamDirection::kServerToClient, MakeTs(3));
+  parser->Feed(response2, wirepeek::StreamDirection::kServerToClient, MakeTs(4));
+
+  ASSERT_EQ(transactions.size(), 1u);
+  EXPECT_EQ(transactions[0].request.body_size, 9u);
+  EXPECT_EQ(transactions[0].response.body_size, 5u);
+}
+
+TEST_F(Http1ParserTest, HeadAndBodylessStatusesIgnoreContentLength) {
+  auto parser = MakeParser();
+  auto requests = ToBytes("HEAD /head HTTP/1.1\r\nHost: x\r\n\r\n"
+                          "GET /empty HTTP/1.1\r\nHost: x\r\n\r\n"
+                          "GET /cached HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto responses = ToBytes("HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n"
+                           "HTTP/1.1 204 No Content\r\nContent-Length: 88\r\n\r\n"
+                           "HTTP/1.1 304 Not Modified\r\nContent-Length: 77\r\n\r\n");
+
+  parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(responses, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
+
+  ASSERT_EQ(transactions.size(), 3u);
+  EXPECT_EQ(transactions[0].response.body_size, 0u);
+  EXPECT_EQ(transactions[1].response.status_code, 204);
+  EXPECT_EQ(transactions[2].response.status_code, 304);
+}
+
+TEST_F(Http1ParserTest, InformationalResponseDoesNotConsumeRequest) {
+  auto parser = MakeParser();
+  auto req = ToBytes("POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
+  auto resp = ToBytes("HTTP/1.1 100 Continue\r\n\r\n"
+                      "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+
+  parser->Feed(req, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(resp, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
+
+  ASSERT_EQ(transactions.size(), 1u);
+  EXPECT_EQ(transactions[0].response.status_code, 200);
+}
+
+TEST_F(Http1ParserTest, UntilCloseBodyCompletesOnClose) {
+  auto parser = MakeParser();
+  auto req = ToBytes("GET /download HTTP/1.1\r\nHost: x\r\n\r\n");
+  auto resp1 = ToBytes("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhello ");
+  auto resp2 = ToBytes("world");
+
+  parser->Feed(req, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(resp1, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
+  parser->Feed(resp2, wirepeek::StreamDirection::kServerToClient, MakeTs(3));
+  EXPECT_TRUE(transactions.empty());
+
+  parser->OnClose();
+  ASSERT_EQ(transactions.size(), 1u);
+  EXPECT_TRUE(transactions[0].complete);
+  EXPECT_EQ(transactions[0].response.body_size, 11u);
+}
+
+TEST_F(Http1ParserTest, SwitchingProtocolsEmitsThenSignalsUpgrade) {
+  bool upgraded = false;
+  auto parser = std::make_unique<Http1Parser>(
+      [this](const wirepeek::HttpTransaction& txn) { transactions.push_back(txn); },
+      [&] { upgraded = true; });
+  auto req = ToBytes("GET /chat HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+  auto resp = ToBytes(
+      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+
+  parser->Feed(req, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+  parser->Feed(resp, wirepeek::StreamDirection::kServerToClient, MakeTs(2));
+
+  ASSERT_EQ(transactions.size(), 1u);
+  EXPECT_EQ(transactions[0].response.status_code, 101);
+  EXPECT_TRUE(upgraded);
+  EXPECT_TRUE(parser->IsUpgraded());
+}
+
+TEST_F(Http1ParserTest, OnCloseEmitsEveryPendingPipelinedRequest) {
+  auto parser = MakeParser();
+  auto requests = ToBytes("GET /one HTTP/1.1\r\nHost: x\r\n\r\n"
+                          "GET /two HTTP/1.1\r\nHost: x\r\n\r\n");
+  parser->Feed(requests, wirepeek::StreamDirection::kClientToServer, MakeTs(1));
+
+  parser->OnClose();
+
+  ASSERT_EQ(transactions.size(), 2u);
+  EXPECT_FALSE(transactions[0].complete);
+  EXPECT_FALSE(transactions[1].complete);
+  EXPECT_EQ(transactions[1].request.url, "/two");
 }
 
 }  // namespace

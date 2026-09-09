@@ -20,11 +20,17 @@ void Statistics::RecordHttpTransaction(const HttpTransaction& txn) {
   ++total_requests_;
 
   txn_timestamps_.push_back(txn.response.timestamp);
+  last_sample_time_ = txn.response.timestamp;
+  PruneOldSamples(txn.response.timestamp);
 }
 
 void Statistics::RecordPacket(size_t bytes, Timestamp ts) {
   std::lock_guard lock(mutex_);
+  ++total_packets_;
   byte_samples_.push_back({ts, bytes});
+  window_bytes_ += bytes;
+  last_sample_time_ = ts;
+  PruneOldSamples(ts);
 }
 
 void Statistics::RecordStreamOpen() {
@@ -42,6 +48,7 @@ void Statistics::PruneOldSamples(Timestamp now) {
   auto cutoff = now - kWindowDuration;
 
   while (!byte_samples_.empty() && byte_samples_.front().ts < cutoff) {
+    window_bytes_ -= byte_samples_.front().bytes;
     byte_samples_.pop_front();
   }
   while (!txn_timestamps_.empty() && txn_timestamps_.front() < cutoff) {
@@ -49,11 +56,17 @@ void Statistics::PruneOldSamples(Timestamp now) {
   }
 }
 
-StatsSnapshot Statistics::Snapshot() const {
+StatsSnapshot Statistics::Snapshot(std::optional<Timestamp> now) {
   std::lock_guard lock(mutex_);
+  if (now) {
+    PruneOldSamples(*now);
+  } else if (last_sample_time_) {
+    PruneOldSamples(*last_sample_time_);
+  }
 
   StatsSnapshot snap;
   snap.total_requests = total_requests_;
+  snap.total_packets = total_packets_;
   snap.active_streams = active_streams_;
 
   if (latency_digest_.Count() > 0) {
@@ -65,16 +78,11 @@ StatsSnapshot Statistics::Snapshot() const {
     }
   }
 
-  // Throughput: sum bytes in window / window duration.
-  size_t total_bytes = 0;
-  for (const auto& s : byte_samples_) {
-    total_bytes += s.bytes;
-  }
-  // Convert bytes/sec to Mbps (megabits per second).
-  snap.throughput_mbps = static_cast<double>(total_bytes) * 8.0 / 1'000'000.0;
+  const double window_seconds = std::chrono::duration<double>(kWindowDuration).count();
+  snap.throughput_mbps =
+      static_cast<double>(window_bytes_) * 8.0 / window_seconds / 1'000'000.0;
 
-  // QPS: transactions in window.
-  snap.qps = static_cast<double>(txn_timestamps_.size());
+  snap.qps = static_cast<double>(txn_timestamps_.size()) / window_seconds;
 
   return snap;
 }
@@ -83,9 +91,12 @@ void Statistics::Reset() {
   std::lock_guard lock(mutex_);
   latency_digest_.Reset();
   byte_samples_.clear();
+  window_bytes_ = 0;
   txn_timestamps_.clear();
+  last_sample_time_.reset();
   latency_sum_us_ = 0;
   total_requests_ = 0;
+  total_packets_ = 0;
   active_streams_ = 0;
 }
 

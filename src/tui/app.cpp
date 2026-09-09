@@ -1,9 +1,11 @@
 // Copyright 2026 lucientong
 // SPDX-License-Identifier: Apache-2.0
 
+#include <wirepeek/analyzer/endpoint_stats.h>
 #include <wirepeek/analyzer/statistics.h>
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/tcp_reassembler.h>
+#include <wirepeek/protocol/dns.h>
 #include <wirepeek/protocol/protocol_handler.h>
 #include <wirepeek/request.h>
 #include <wirepeek/tui/app.h>
@@ -18,8 +20,11 @@
 #include <ftxui/component/loop.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <iterator>
 #include <spdlog/spdlog.h>
 #include <thread>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace wirepeek::tui {
@@ -61,6 +66,27 @@ ftxui::Color ProtocolColor(const std::string& proto) {
   return ftxui::Color::GrayLight;
 }
 
+ConnectionKey MakeUdpKey(const dissector::DissectedPacket& packet) {
+  ConnectionKey key;
+  if (!packet.ip || !packet.udp)
+    return key;
+  key.ip_version = packet.ip->version;
+  key.protocol = packet.ip->protocol;
+  key.src_port = packet.udp->src_port;
+  key.dst_port = packet.udp->dst_port;
+  std::visit(
+      [&key](const auto& address) {
+        std::copy(address.begin(), address.end(), key.src_ip.begin());
+      },
+      packet.ip->src_ip);
+  std::visit(
+      [&key](const auto& address) {
+        std::copy(address.begin(), address.end(), key.dst_ip.begin());
+      },
+      packet.ip->dst_ip);
+  return key;
+}
+
 // Sparkline chars: ▁▂▃▄▅▆▇█
 const char* SparkChar(int value, int max_val) {
   if (max_val <= 0)
@@ -80,61 +106,123 @@ TuiApp::~TuiApp() {
 
 void TuiApp::CaptureLoop(capture::CaptureSource& source) {
   auto stats = std::make_shared<analyzer::Statistics>();
+  auto endpoints = std::make_shared<analyzer::EndpointStats>(5);
 
   auto protocol_handler = std::make_unique<protocol::ProtocolHandler>(
-      [this, stats](const ConnectionKey& /*key*/, const HttpTransaction& txn) {
-        state_->IncrementHttpTransactions();
-        stats->RecordHttpTransaction(txn);
-
+      [this, stats, endpoints](const ConnectionKey&, const AppEvent& event) {
         TuiEntry entry;
-        entry.timestamp = txn.request.timestamp;
-        entry.protocol = "HTTP";
-        entry.method = txn.request.method;
-        entry.url = txn.request.url;
-        entry.status = txn.response.status_code;
-
-        if (txn.complete) {
-          auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(txn.latency).count();
-          entry.latency = fmt::format("{}ms", ms);
-          entry.size = fmt::format("{}", txn.response.body_size);
-
-          std::string detail;
-          detail +=
-              fmt::format("{} {} {}\n", txn.request.method, txn.request.url, txn.request.version);
-          for (const auto& [name, value] : txn.request.headers) {
-            detail += fmt::format("{}: {}\n", name, value);
-          }
-          detail += fmt::format("\n-> {} {} (Content-Length: {})\n", txn.response.status_code,
-                                txn.response.reason, txn.response.body_size);
-          for (const auto& [name, value] : txn.response.headers) {
-            detail += fmt::format("{}: {}\n", name, value);
-          }
-          entry.detail = std::move(detail);
-        } else {
-          entry.detail = fmt::format("{} {} {}\n(no response)\n", txn.request.method,
-                                     txn.request.url, txn.request.version);
-        }
-
-        state_->AddEntry(std::move(entry));
-      },
-      [this](const ConnectionKey& /*key*/, StreamDirection dir, std::span<const uint8_t> data) {
-        TuiEntry entry;
-        entry.timestamp = std::chrono::time_point_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now());
-        entry.protocol = "TCP";
-        entry.url = (dir == StreamDirection::kClientToServer) ? "client->server" : "server->client";
-        entry.size = fmt::format("{}", data.size());
-        entry.detail = fmt::format("Raw TCP data: {} bytes\n", data.size());
+        std::visit(
+            [&](const auto& value) {
+              using Event = std::decay_t<decltype(value)>;
+              if constexpr (std::is_same_v<Event, HttpTransaction>) {
+                state_->IncrementHttpTransactions();
+                stats->RecordHttpTransaction(value);
+                endpoints->Record(value);
+                state_->SetEndpoints(endpoints->Snapshot());
+                entry.timestamp = value.request.timestamp;
+                entry.protocol = "HTTP";
+                entry.method = value.request.method;
+                entry.url = value.request.url;
+                entry.status = value.response.status_code;
+                if (value.complete) {
+                  entry.latency = fmt::format("{}ms", value.latency.count() / 1000);
+                  entry.size = fmt::format("{}", value.response.body_size);
+                  entry.detail = fmt::format("{} {} {}\n", value.request.method, value.request.url,
+                                             value.request.version);
+                  for (const auto& [name, header_value] : value.request.headers)
+                    entry.detail += fmt::format("{}: {}\n", name, header_value);
+                  entry.detail +=
+                      fmt::format("\n-> {} {} (Content-Length: {})\n", value.response.status_code,
+                                  value.response.reason, value.response.body_size);
+                  for (const auto& [name, header_value] : value.response.headers)
+                    entry.detail += fmt::format("{}: {}\n", name, header_value);
+                  entry.detail += "\nTiming:\n";
+                  if (value.timing.tcp_handshake)
+                    entry.detail +=
+                        fmt::format("TCP handshake: {}us\n", value.timing.tcp_handshake->count());
+                  if (value.timing.tls_handshake)
+                    entry.detail +=
+                        fmt::format("TLS handshake: {}us\n", value.timing.tls_handshake->count());
+                  if (value.timing.ttfb)
+                    entry.detail += fmt::format("TTFB: {}us\n", value.timing.ttfb->count());
+                  if (value.timing.transfer)
+                    entry.detail += fmt::format("Transfer: {}us\n", value.timing.transfer->count());
+                } else {
+                  entry.detail = fmt::format("{} {} {}\n(no response)\n", value.request.method,
+                                             value.request.url, value.request.version);
+                }
+              } else if constexpr (std::is_same_v<Event, RedisTransaction>) {
+                entry.timestamp = value.timestamp;
+                entry.protocol = "Redis";
+                entry.method = value.command;
+                entry.url = value.args_summary;
+                entry.latency = fmt::format("{}ms", value.latency.count() / 1000);
+                entry.detail = fmt::format("{} {}\n-> {}\n", value.command, value.args_summary,
+                                           value.response_summary);
+              } else if constexpr (std::is_same_v<Event, Http2StreamEvent>) {
+                entry.timestamp = value.timestamp;
+                entry.protocol = value.grpc ? "gRPC" : "HTTP/2";
+                entry.method = value.method;
+                entry.url =
+                    value.path.empty() ? fmt::format("stream {}", value.stream_id) : value.path;
+                entry.status = value.status;
+                entry.size = fmt::format("{}", value.payload_size);
+                entry.detail = fmt::format("HTTP/2 stream {}\nFrame type: {}\nFlags: 0x{:02x}\n",
+                                           value.stream_id, value.frame_type, value.flags);
+              } else if constexpr (std::is_same_v<Event, DnsEvent>) {
+                entry.timestamp = value.query.timestamp;
+                entry.protocol = "DNS";
+                entry.method = DnsTypeName(value.query.type);
+                entry.url = value.query.name;
+                entry.latency = fmt::format("{}ms", value.latency.count() / 1000);
+                entry.detail =
+                    fmt::format("DNS {} {} rcode={}\n", DnsTypeName(value.query.type),
+                                value.query.name, value.response ? value.response->rcode : 0);
+                if (value.response) {
+                  for (const auto& answer : value.response->answers)
+                    entry.detail += fmt::format("{}\n", answer);
+                }
+              } else if constexpr (std::is_same_v<Event, TlsHandshakeInfo>) {
+                entry.timestamp = value.timestamp;
+                entry.protocol = "TLS";
+                entry.method = value.is_client_hello ? "Client" : "Server";
+                entry.url = !value.sni.empty() ? value.sni : value.cipher_suite;
+                entry.detail =
+                    fmt::format("{}\nVersion: {}\nSNI: {}\nCipher: {}\n",
+                                value.is_client_hello ? "ClientHello" : "ServerHello",
+                                TlsVersionName(value.version), value.sni, value.cipher_suite);
+              } else if constexpr (std::is_same_v<Event, WebSocketEvent>) {
+                entry.timestamp = std::chrono::time_point_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now());
+                entry.protocol = "WS";
+                entry.url = WsOpcodeName(value.frame.opcode);
+                entry.size = fmt::format("{}", value.frame.payload_len);
+                entry.detail = fmt::format("WebSocket {} frame\nFIN: {}\nMasked: {}\nBytes: {}\n",
+                                           WsOpcodeName(value.frame.opcode), value.frame.fin,
+                                           value.frame.masked, value.frame.payload_len);
+              } else if constexpr (std::is_same_v<Event, RawFlowEvent>) {
+                entry.timestamp = value.ts;
+                entry.protocol = value.protocol == AppProtocol::kHttp2 ? "HTTP/2" : "TCP";
+                entry.url = value.dir == StreamDirection::kClientToServer ? "client->server"
+                                                                          : "server->client";
+                entry.size = fmt::format("{}", value.bytes);
+                entry.detail = fmt::format("{} data: {} bytes\n", AppProtocolName(value.protocol),
+                                           value.bytes);
+              }
+            },
+            event);
         state_->AddEntry(std::move(entry));
       });
 
   std::unique_ptr<dissector::TcpReassembler> reassembler;
   if (!config_.no_reassemble) {
     reassembler = std::make_unique<dissector::TcpReassembler>(
-        [&protocol_handler](const dissector::StreamEvent& event) {
-          auto now = std::chrono::time_point_cast<std::chrono::microseconds>(
-              std::chrono::system_clock::now());
-          protocol_handler->OnStreamEvent(event, now);
+        [&protocol_handler, stats](const dissector::StreamEvent& event) {
+          if (event.type == dissector::StreamEventType::kOpen)
+            stats->RecordStreamOpen();
+          else if (event.type == dissector::StreamEventType::kClose)
+            stats->RecordStreamClose();
+          protocol_handler->OnStreamEvent(event, event.timestamp);
         });
   }
 
@@ -158,9 +246,19 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
       state_->PushPpsSample(pps_counter);
       pps_counter = 0;
       last_pps_push = now_steady;
+      auto snap = stats->Snapshot(pkt.timestamp);
+      state_->UpdateAnalyzerStats(snap.p50_latency_us, snap.p95_latency_us, snap.p99_latency_us,
+                                  snap.throughput_mbps, snap.qps);
+      if (reassembler) {
+        reassembler->FlushExpired(pkt.timestamp);
+      }
     }
 
     auto dissected = dissector::Dissect(pkt);
+
+    if (dissected.ip && dissected.udp) {
+      protocol_handler->OnUdpPayload(MakeUdpKey(dissected), dissected.udp->payload, pkt.timestamp);
+    }
 
     if (reassembler) {
       reassembler->ProcessPacket(dissected, pkt.timestamp);
@@ -170,20 +268,18 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
     if (!dissected.tcp && dissected.ip) {
       TuiEntry entry;
       entry.timestamp = pkt.timestamp;
-      if (dissected.udp) {
+      if (dissected.udp && dissected.udp->src_port != 53 && dissected.udp->dst_port != 53 &&
+          !protocol::LooksDnsShaped(dissected.udp->payload)) {
         entry.protocol = "UDP";
         entry.url = fmt::format("port {} -> {}", dissected.udp->src_port, dissected.udp->dst_port);
         entry.size = fmt::format("{}", dissected.udp->payload.size());
-      } else {
+      } else if (!dissected.udp) {
         entry.protocol = fmt::format("proto={}", dissected.ip->protocol);
         entry.url = dissector::FormatSummary(dissected);
       }
-      state_->AddEntry(std::move(entry));
+      if (!entry.protocol.empty())
+        state_->AddEntry(std::move(entry));
     }
-
-    auto snap = stats->Snapshot();
-    state_->UpdateAnalyzerStats(snap.p50_latency_us, snap.p95_latency_us, snap.p99_latency_us,
-                                snap.throughput_mbps, snap.qps);
   });
 }
 
@@ -199,7 +295,10 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
 
   int selected = 0;
   bool show_detail = true;
+  bool follow = true;
+  int detail_scroll = 0;
   bool filter_active = false;
+  bool endpoint_view = false;
   std::string filter_text;
   std::vector<TuiEntry> cached_entries;
   TuiStats cached_stats;
@@ -282,8 +381,10 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
     }
 
     int max_visible = 20;
-    int start_idx = std::max(0, static_cast<int>(cached_entries.size()) - max_visible);
-    for (int i = start_idx; i < static_cast<int>(cached_entries.size()); ++i) {
+    int max_start = std::max(0, static_cast<int>(cached_entries.size()) - max_visible);
+    int start_idx = std::clamp(selected - max_visible / 2, 0, max_start);
+    int end_idx = std::min(static_cast<int>(cached_entries.size()), start_idx + max_visible);
+    for (int i = start_idx; i < end_idx; ++i) {
       const auto& e = cached_entries[i];
       bool is_selected = (i == selected);
 
@@ -307,7 +408,30 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
       table_rows.push_back(row);
     }
 
-    auto request_list = vbox(std::move(table_rows)) | borderLight | flex;
+    Element request_list;
+    if (endpoint_view) {
+      std::vector<Element> endpoint_rows;
+      endpoint_rows.push_back(hbox({
+          text("Method") | size(WIDTH, EQUAL, 9) | bold,
+          text("Normalized route") | flex | bold,
+          text("Count") | size(WIDTH, EQUAL, 9) | bold,
+          text("Errors") | size(WIDTH, EQUAL, 9) | bold,
+          text("P95") | size(WIDTH, EQUAL, 10) | bold,
+      }));
+      endpoint_rows.push_back(separatorLight());
+      for (const auto& endpoint : state_->GetEndpoints()) {
+        endpoint_rows.push_back(hbox({
+            text(endpoint.method) | size(WIDTH, EQUAL, 9),
+            text(endpoint.route) | flex,
+            text(fmt::format("{}", endpoint.count)) | size(WIDTH, EQUAL, 9),
+            text(fmt::format("{}", endpoint.error_count)) | size(WIDTH, EQUAL, 9),
+            text(fmt::format("{}ms", endpoint.p95_latency_us / 1000)) | size(WIDTH, EQUAL, 10),
+        }));
+      }
+      request_list = vbox(std::move(endpoint_rows)) | borderLight | flex;
+    } else {
+      request_list = vbox(std::move(table_rows)) | borderLight | flex;
+    }
 
     // ── Detail panel ──
     Element detail_panel = text("");
@@ -327,7 +451,16 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
         }
         if (!line.empty())
           detail_lines.push_back(text(line));
-        detail_panel = vbox(std::move(detail_lines)) | borderLight | size(HEIGHT, LESS_THAN, 10);
+        constexpr int kDetailLines = 12;
+        detail_scroll = std::clamp(
+            detail_scroll, 0, std::max(0, static_cast<int>(detail_lines.size()) - kDetailLines));
+        std::vector<Element> visible_lines;
+        auto begin = detail_lines.begin() + detail_scroll;
+        auto end = detail_lines.begin() +
+                   std::min(static_cast<int>(detail_lines.size()), detail_scroll + kDetailLines);
+        visible_lines.insert(visible_lines.end(), std::make_move_iterator(begin),
+                             std::make_move_iterator(end));
+        detail_panel = vbox(std::move(visible_lines)) | borderLight | size(HEIGHT, LESS_THAN, 14);
       }
     }
 
@@ -339,6 +472,12 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
                         text(":nav "),
                         text("d") | bold | color(Color::Yellow),
                         text(":detail "),
+                        text("e") | bold | color(Color::Yellow),
+                        text(endpoint_view ? ":requests " : ":endpoints "),
+                        text("Space") | bold | color(Color::Yellow),
+                        text(follow ? ":pause " : ":follow "),
+                        text("PgUp/PgDn") | bold | color(Color::Yellow),
+                        text(":detail scroll "),
                         text("/") | bold | color(Color::Yellow),
                         text(":filter "),
                         text("Esc") | bold | color(Color::Yellow),
@@ -387,17 +526,41 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
       return true;
     }
     if (event == ftxui::Event::ArrowUp) {
-      if (selected > 0)
+      if (selected > 0) {
         --selected;
+        follow = false;
+        detail_scroll = 0;
+      }
       return true;
     }
     if (event == ftxui::Event::ArrowDown) {
-      if (selected < static_cast<int>(cached_entries.size()) - 1)
+      if (selected < static_cast<int>(cached_entries.size()) - 1) {
         ++selected;
+        follow = false;
+        detail_scroll = 0;
+      }
+      return true;
+    }
+    if (event == ftxui::Event::Character(' ')) {
+      follow = !follow;
+      if (follow)
+        selected = std::max(0, static_cast<int>(cached_entries.size()) - 1);
+      return true;
+    }
+    if (event == ftxui::Event::PageUp) {
+      detail_scroll = std::max(0, detail_scroll - 6);
+      return true;
+    }
+    if (event == ftxui::Event::PageDown) {
+      detail_scroll += 6;
       return true;
     }
     if (event == ftxui::Event::Character('d')) {
       show_detail = !show_detail;
+      return true;
+    }
+    if (event == ftxui::Event::Character('e')) {
+      endpoint_view = !endpoint_view;
       return true;
     }
     if (event == ftxui::Event::Character('/')) {
@@ -406,8 +569,9 @@ void TuiApp::Run(std::unique_ptr<capture::CaptureSource> source) {
       return true;
     }
     if (event == ftxui::Event::Custom) {
-      if (filter_text.empty()) {
+      if (follow && filter_text.empty()) {
         selected = std::max(0, static_cast<int>(cached_entries.size()) - 1);
+        detail_scroll = 0;
       }
       return true;
     }

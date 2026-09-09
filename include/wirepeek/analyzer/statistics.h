@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
 
 namespace wirepeek::analyzer {
 
@@ -26,6 +27,7 @@ struct StatsSnapshot {
   double throughput_mbps = 0.0;  ///< Throughput in Mbps (last 1s window).
   double qps = 0.0;              ///< HTTP transactions per second (last 1s window).
   uint64_t total_requests = 0;   ///< Total HTTP transactions seen.
+  uint64_t total_packets = 0;    ///< Total packets seen.
   uint64_t active_streams = 0;   ///< Currently active TCP streams.
 };
 
@@ -48,7 +50,7 @@ class Statistics {
   void RecordStreamClose();
 
   /// Get a point-in-time snapshot of all statistics.
-  [[nodiscard]] StatsSnapshot Snapshot() const;
+  [[nodiscard]] StatsSnapshot Snapshot(std::optional<Timestamp> now = std::nullopt);
 
   /// Reset all statistics.
   void Reset();
@@ -63,12 +65,15 @@ class Statistics {
     size_t bytes;
   };
   std::deque<ByteSample> byte_samples_;
+  size_t window_bytes_ = 0;
 
   // QPS: sliding window of transaction timestamps.
   std::deque<Timestamp> txn_timestamps_;
+  std::optional<Timestamp> last_sample_time_;
 
   int64_t latency_sum_us_ = 0;
   uint64_t total_requests_ = 0;
+  uint64_t total_packets_ = 0;
   uint64_t active_streams_ = 0;
 
   static constexpr auto kWindowDuration = std::chrono::seconds(1);
