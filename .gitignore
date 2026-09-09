@@ -12,6 +12,7 @@ out/
 # IDE files
 .idea/
 .vscode/
+.cursor/
 .claude/
 .claude-internal/
 *.swp
