@@ -14,7 +14,7 @@ constexpr size_t kIpv4MinHeaderLen = 20;
 constexpr size_t kIpv6HeaderLen = 40;
 }  // namespace
 
-static DissectResult<IpInfo> ParseIpv4(std::span<const uint8_t> data) {
+static DissectResult<IpInfo> ParseIpv4(std::span<const uint8_t> data) noexcept {
   if (data.size() < kIpv4MinHeaderLen) {
     return Unexpected<IpInfo>(DissectError::kTruncated);
   }
@@ -58,7 +58,7 @@ static DissectResult<IpInfo> ParseIpv4(std::span<const uint8_t> data) {
   return info;
 }
 
-static DissectResult<IpInfo> ParseIpv6(std::span<const uint8_t> data) {
+static DissectResult<IpInfo> ParseIpv6(std::span<const uint8_t> data) noexcept {
   if (data.size() < kIpv6HeaderLen) {
     return Unexpected<IpInfo>(DissectError::kTruncated);
   }
@@ -91,7 +91,7 @@ static DissectResult<IpInfo> ParseIpv6(std::span<const uint8_t> data) {
   return info;
 }
 
-DissectResult<IpInfo> ParseIp(std::span<const uint8_t> data) {
+DissectResult<IpInfo> ParseIp(std::span<const uint8_t> data) noexcept {
   if (data.empty()) {
     return Unexpected<IpInfo>(DissectError::kTruncated);
   }

@@ -41,7 +41,7 @@ struct EthernetInfo {
 /// Handles standard Ethernet II and single 802.1Q VLAN tags.
 /// @param data Raw frame bytes starting from the Ethernet header.
 /// @return Parsed EthernetInfo or a DissectError.
-DissectResult<EthernetInfo> ParseEthernet(std::span<const uint8_t> data);
+DissectResult<EthernetInfo> ParseEthernet(std::span<const uint8_t> data) noexcept;
 
 /// Format a MAC address as "xx:xx:xx:xx:xx:xx".
 std::string FormatMac(const MacAddress& mac);

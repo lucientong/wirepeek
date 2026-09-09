@@ -10,7 +10,7 @@ namespace {
 constexpr size_t kUdpHeaderLen = 8;
 }  // namespace
 
-DissectResult<UdpInfo> ParseUdp(std::span<const uint8_t> data) {
+DissectResult<UdpInfo> ParseUdp(std::span<const uint8_t> data) noexcept {
   if (data.size() < kUdpHeaderLen) {
     return Unexpected<UdpInfo>(DissectError::kTruncated);
   }

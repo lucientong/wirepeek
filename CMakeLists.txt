@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(wirepeek
-  VERSION 1.0.0
+  VERSION 1.1.0
   LANGUAGES CXX
   DESCRIPTION "High-performance network packet analyzer with modern TUI"
 )
@@ -9,6 +9,27 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(WIREPEEK_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(WIREPEEK_BUILD_FUZZERS "Build libFuzzer targets" OFF)
+option(WIREPEEK_BUILD_BENCHMARKS "Build Google Benchmark targets" OFF)
+option(WIREPEEK_ENABLE_TLS_DECRYPT "Enable experimental OpenSSL TLS decryption support" OFF)
+
+if(WIREPEEK_ENABLE_SANITIZERS)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    message(FATAL_ERROR "WIREPEEK_ENABLE_SANITIZERS requires Clang or GCC")
+  endif()
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+
+if(WIREPEEK_BUILD_FUZZERS AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "WIREPEEK_BUILD_FUZZERS requires Clang")
+endif()
+if(WIREPEEK_BUILD_FUZZERS)
+  add_compile_options(-fsanitize=fuzzer-no-link,address -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address)
+endif()
 
 # Generate version header from CMake project version.
 configure_file(
@@ -71,11 +92,30 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
+if(WIREPEEK_BUILD_BENCHMARKS)
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG v1.9.1
+    GIT_SHALLOW TRUE
+  )
+endif()
+
 FetchContent_MakeAvailable(fmt spdlog CLI11 xxHash ftxui googletest)
+if(WIREPEEK_BUILD_BENCHMARKS)
+  FetchContent_MakeAvailable(benchmark)
+endif()
 
 # ── System dependencies ────────────────────────────────────────────────────────
 
 find_package(Pcap REQUIRED)
+if(WIREPEEK_ENABLE_TLS_DECRYPT)
+  find_package(OpenSSL QUIET)
+  if(NOT OpenSSL_FOUND)
+    message(WARNING "OpenSSL not found; experimental TLS decryption support is disabled")
+  endif()
+endif()
 
 # ── Subdirectories ─────────────────────────────────────────────────────────────
 
@@ -83,3 +123,11 @@ add_subdirectory(src)
 
 enable_testing()
 add_subdirectory(tests)
+
+if(WIREPEEK_BUILD_FUZZERS)
+  add_subdirectory(tests/fuzz)
+endif()
+
+if(WIREPEEK_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()

@@ -6,9 +6,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <xxhash.h>
 
 namespace wirepeek {
 
@@ -36,20 +38,15 @@ struct ConnectionKey {
 template <>
 struct std::hash<wirepeek::ConnectionKey> {
   size_t operator()(const wirepeek::ConnectionKey& key) const noexcept {
-    // Simple FNV-1a hash over the raw bytes of the key.
-    size_t h = 14695981039346656037ULL;
-    auto hash_bytes = [&h](const void* data, size_t len) {
-      const auto* p = static_cast<const uint8_t*>(data);
-      for (size_t i = 0; i < len; ++i) {
-        h ^= p[i];
-        h *= 1099511628211ULL;
-      }
-    };
-    hash_bytes(key.src_ip.data(), key.src_ip.size());
-    hash_bytes(key.dst_ip.data(), key.dst_ip.size());
-    hash_bytes(&key.src_port, sizeof(key.src_port));
-    hash_bytes(&key.dst_port, sizeof(key.dst_port));
-    hash_bytes(&key.protocol, sizeof(key.protocol));
-    return h;
+    std::array<uint8_t, 38> bytes{};
+    std::copy(key.src_ip.begin(), key.src_ip.end(), bytes.begin());
+    std::copy(key.dst_ip.begin(), key.dst_ip.end(), bytes.begin() + 16);
+    bytes[32] = static_cast<uint8_t>(key.src_port >> 8);
+    bytes[33] = static_cast<uint8_t>(key.src_port);
+    bytes[34] = static_cast<uint8_t>(key.dst_port >> 8);
+    bytes[35] = static_cast<uint8_t>(key.dst_port);
+    bytes[36] = key.ip_version;
+    bytes[37] = key.protocol;
+    return static_cast<size_t>(XXH3_64bits(bytes.data(), bytes.size()));
   }
 };

@@ -14,7 +14,7 @@ namespace {
 constexpr size_t kTcpMinHeaderLen = 20;
 }  // namespace
 
-DissectResult<TcpInfo> ParseTcp(std::span<const uint8_t> data) {
+DissectResult<TcpInfo> ParseTcp(std::span<const uint8_t> data) noexcept {
   if (data.size() < kTcpMinHeaderLen) {
     return Unexpected<TcpInfo>(DissectError::kTruncated);
   }

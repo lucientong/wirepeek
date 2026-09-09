@@ -26,6 +26,6 @@ struct UdpInfo {
 ///
 /// @param data Raw bytes starting from the UDP header.
 /// @return Parsed UdpInfo or a DissectError.
-DissectResult<UdpInfo> ParseUdp(std::span<const uint8_t> data);
+DissectResult<UdpInfo> ParseUdp(std::span<const uint8_t> data) noexcept;
 
 }  // namespace wirepeek::dissector

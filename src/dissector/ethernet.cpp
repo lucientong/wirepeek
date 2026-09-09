@@ -16,7 +16,7 @@ constexpr size_t kEthernetHeaderLen = 14;
 constexpr size_t kVlanTagLen = 4;
 }  // namespace
 
-DissectResult<EthernetInfo> ParseEthernet(std::span<const uint8_t> data) {
+DissectResult<EthernetInfo> ParseEthernet(std::span<const uint8_t> data) noexcept {
   if (data.size() < kEthernetHeaderLen) {
     return Unexpected<EthernetInfo>(DissectError::kTruncated);
   }

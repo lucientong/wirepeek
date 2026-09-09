@@ -49,7 +49,7 @@ struct IpInfo {
 ///
 /// @param data Raw bytes starting from the IP header.
 /// @return Parsed IpInfo or a DissectError.
-DissectResult<IpInfo> ParseIp(std::span<const uint8_t> data);
+DissectResult<IpInfo> ParseIp(std::span<const uint8_t> data) noexcept;
 
 /// Format an IP address as a human-readable string.
 /// IPv4: "a.b.c.d", IPv6: abbreviated hex notation.

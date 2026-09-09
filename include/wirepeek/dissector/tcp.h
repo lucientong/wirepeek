@@ -44,7 +44,7 @@ struct TcpInfo {
 ///
 /// @param data Raw bytes starting from the TCP header.
 /// @return Parsed TcpInfo or a DissectError.
-DissectResult<TcpInfo> ParseTcp(std::span<const uint8_t> data);
+DissectResult<TcpInfo> ParseTcp(std::span<const uint8_t> data) noexcept;
 
 /// Format TCP flags as a human-readable string (e.g., "[SYN, ACK]").
 std::string FormatTcpFlags(uint8_t flags);
