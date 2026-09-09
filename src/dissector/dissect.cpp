@@ -4,6 +4,7 @@
 #include <wirepeek/dissector/dissect.h>
 #include <wirepeek/dissector/ethernet.h>
 #include <wirepeek/dissector/ip.h>
+#include <wirepeek/dissector/link.h>
 #include <wirepeek/dissector/tcp.h>
 #include <wirepeek/dissector/udp.h>
 
@@ -11,35 +12,79 @@
 
 namespace wirepeek::dissector {
 
-DissectedPacket Dissect(const PacketView& packet) {
-  DissectedPacket result;
+namespace {
 
-  // Layer 2: Ethernet.
-  auto eth = ParseEthernet(packet.data);
-  if (!eth)
-    return result;
-  result.ethernet = *eth;
-
-  // Only continue for IP packets.
-  if (eth->ether_type != ethertype::kIPv4 && eth->ether_type != ethertype::kIPv6) {
-    return result;
-  }
-
-  // Layer 3: IP.
-  auto ip = ParseIp(eth->payload);
-  if (!ip)
-    return result;
-  result.ip = *ip;
-
-  // Layer 4: TCP or UDP.
-  if (ip->protocol == ip_protocol::kTCP) {
-    auto tcp = ParseTcp(ip->payload);
+void DissectTransport(DissectedPacket& result, const IpInfo& ip) {
+  if (ip.protocol == ip_protocol::kTCP) {
+    auto tcp = ParseTcp(ip.payload);
     if (tcp)
       result.tcp = *tcp;
-  } else if (ip->protocol == ip_protocol::kUDP) {
-    auto udp = ParseUdp(ip->payload);
+  } else if (ip.protocol == ip_protocol::kUDP) {
+    auto udp = ParseUdp(ip.payload);
     if (udp)
       result.udp = *udp;
+  }
+}
+
+void DissectFromIp(DissectedPacket& result, std::span<const uint8_t> ip_bytes) {
+  auto ip = ParseIp(ip_bytes);
+  if (!ip)
+    return;
+  result.ip = *ip;
+  DissectTransport(result, *ip);
+}
+
+}  // namespace
+
+DissectedPacket Dissect(const PacketView& packet) {
+  DissectedPacket result;
+  result.link_type = packet.link_type;
+
+  switch (packet.link_type) {
+    case LinkType::kEthernet: {
+      auto eth = ParseEthernet(packet.data);
+      if (!eth)
+        return result;
+      result.ethernet = *eth;
+      if (eth->ether_type != ethertype::kIPv4 && eth->ether_type != ethertype::kIPv6) {
+        return result;
+      }
+      DissectFromIp(result, eth->payload);
+      break;
+    }
+    case LinkType::kNull:
+    case LinkType::kLoop: {
+      auto link = ParseNullLoop(packet.data, packet.link_type);
+      if (!link)
+        return result;
+      if (link->ether_type != ethertype::kIPv4 && link->ether_type != ethertype::kIPv6) {
+        return result;
+      }
+      DissectFromIp(result, link->payload);
+      break;
+    }
+    case LinkType::kLinuxSll:
+    case LinkType::kLinuxSll2: {
+      auto link = ParseLinuxSll(packet.data, packet.link_type);
+      if (!link)
+        return result;
+      if (link->ether_type != ethertype::kIPv4 && link->ether_type != ethertype::kIPv6) {
+        return result;
+      }
+      DissectFromIp(result, link->payload);
+      break;
+    }
+    case LinkType::kRaw: {
+      auto link = ParseRawIp(packet.data);
+      if (!link)
+        return result;
+      DissectFromIp(result, link->payload);
+      break;
+    }
+    case LinkType::kUnknown:
+    default:
+      // Unknown link type — do not pretend this is Ethernet.
+      break;
   }
 
   return result;

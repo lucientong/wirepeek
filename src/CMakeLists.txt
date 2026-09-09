@@ -5,16 +5,22 @@ add_library(wirepeek_lib STATIC
   dissector/ip.cpp
   dissector/tcp.cpp
   dissector/udp.cpp
+  dissector/link.cpp
   dissector/dissect.cpp
   dissector/tcp_reassembler.cpp
   protocol/detector.cpp
   protocol/http1.cpp
+  protocol/http2.cpp
+  protocol/redis.cpp
   protocol/dns.cpp
   protocol/tls.cpp
+  protocol/tls_keylog.cpp
   protocol/websocket.cpp
   protocol/protocol_handler.cpp
   analyzer/tdigest.cpp
   analyzer/statistics.cpp
+  analyzer/endpoint_stats.cpp
+  analyzer/metrics_server.cpp
   export/pcap_writer.cpp
   export/har_writer.cpp
   export/json_writer.cpp
@@ -37,6 +43,11 @@ target_link_libraries(wirepeek_lib PUBLIC
   ftxui::dom
   ftxui::component
 )
+
+if(WIREPEEK_ENABLE_TLS_DECRYPT AND OpenSSL_FOUND)
+  target_link_libraries(wirepeek_lib PUBLIC OpenSSL::Crypto)
+  target_compile_definitions(wirepeek_lib PUBLIC WIREPEEK_ENABLE_TLS_DECRYPT=1)
+endif()
 
 # ── wirepeek: main executable ─────────────────────────────────────────────────
 

@@ -92,6 +92,30 @@ TEST(HarWriterTest, SingleTransaction) {
   EXPECT_NE(json.find("\"bodySize\": 42"), std::string::npos);
 }
 
+TEST(HarWriterTest, UsesAbsoluteUrlAndRequiredHarFields) {
+  HarWriter writer;
+  HttpTransaction txn;
+  txn.request.method = "GET";
+  txn.request.url = "/assets/app.js";
+  txn.request.version = "HTTP/1.1";
+  txn.request.headers = {{"Host", "example.com"}};
+  txn.request.timestamp = MakeTs(1000);
+  txn.response.status_code = 200;
+  txn.response.version = "HTTP/1.1";
+  txn.complete = true;
+  writer.AddTransaction(txn);
+
+  const auto json = writer.ToJson();
+  EXPECT_NE(json.find("\"url\": \"http://example.com/assets/app.js\""), std::string::npos);
+  EXPECT_NE(json.find("\"cookies\": []"), std::string::npos);
+  EXPECT_NE(json.find("\"queryString\": []"), std::string::npos);
+  EXPECT_NE(json.find("\"headersSize\": -1"), std::string::npos);
+  EXPECT_NE(json.find("\"redirectURL\": \"\""), std::string::npos);
+  EXPECT_NE(json.find("\"content\":"), std::string::npos);
+  EXPECT_NE(json.find("\"cache\": {}"), std::string::npos);
+  EXPECT_NE(json.find("\"timings\":"), std::string::npos);
+}
+
 TEST(HarWriterTest, WriteToFile) {
   std::string path = "/tmp/wirepeek_test.har";
   HarWriter writer;
@@ -152,6 +176,25 @@ TEST(JsonWriterTest, WriteHttpTransaction) {
   EXPECT_NE(line.find("\"type\":\"http\""), std::string::npos);
   EXPECT_NE(line.find("\"method\":\"GET\""), std::string::npos);
   EXPECT_NE(line.find("\"latency_us\":5000"), std::string::npos);
+  std::remove(path.c_str());
+}
+
+TEST(JsonWriterTest, EscapesAllJsonControlCharacters) {
+  std::string path = "/tmp/wirepeek_test_controls.jsonl";
+  {
+    JsonWriter writer(path);
+    HttpTransaction txn;
+    txn.request.method = std::string({'G', '\x01', 'E', 'T'});
+    txn.request.url = std::string("/a\0b\b\f\n\r\t", 9);
+    txn.request.timestamp = MakeTs(200);
+    writer.WriteHttpTransaction(txn);
+  }
+
+  std::ifstream file(path, std::ios::binary);
+  std::string line((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(line.find("G\\u0001ET"), std::string::npos);
+  EXPECT_NE(line.find("/a\\u0000b\\b\\f\\n\\r\\t"), std::string::npos);
+  EXPECT_EQ(line.find('\0'), std::string::npos);
   std::remove(path.c_str());
 }
 

@@ -29,7 +29,7 @@ struct PcapConfig {
 };
 
 /// Live packet capture source using libpcap.
-class PcapSource : public CaptureSource {
+class PcapSource final : public CaptureSource {
  public:
   /// Create a PcapSource with the given configuration.
   /// @throws std::runtime_error if the interface cannot be opened.
@@ -44,6 +44,7 @@ class PcapSource : public CaptureSource {
   void Start(PacketCallback callback) override;
   void Stop() override;
   CaptureStats Stats() const override;
+  LinkType GetLinkType() const override { return link_type_; }
 
  private:
   /// Custom deleter for pcap_t*.
@@ -54,6 +55,7 @@ class PcapSource : public CaptureSource {
   PcapConfig config_;
   std::unique_ptr<pcap_t, PcapDeleter> handle_;
   std::atomic<bool> running_{false};
+  LinkType link_type_ = LinkType::kEthernet;
 };
 
 }  // namespace wirepeek::capture

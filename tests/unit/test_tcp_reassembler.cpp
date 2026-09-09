@@ -3,8 +3,10 @@
 
 #include <wirepeek/dissector/tcp_reassembler.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -49,6 +51,7 @@ class TcpReassemblerTest : public ::testing::Test {
     StreamEventType type;
     StreamDirection direction;
     std::vector<uint8_t> data;
+    Timestamp timestamp;
   };
 
   std::vector<Event> events;
@@ -58,7 +61,8 @@ class TcpReassemblerTest : public ::testing::Test {
     return std::make_unique<TcpReassembler>(
         [this](const StreamEvent& e) {
           events.push_back(
-              {e.type, e.direction, std::vector<uint8_t>(e.data.begin(), e.data.end())});
+              {e.type, e.direction, std::vector<uint8_t>(e.data.begin(), e.data.end()),
+               e.timestamp});
         },
         config);
   }
@@ -138,7 +142,7 @@ TEST_F(TcpReassemblerTest, InOrderDelivery) {
       MakeTs(2));
   r->ProcessPacket(
       MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 103, tcp_flags::kACK, d2),
-      MakeTs(2));
+      MakeTs(3));
 
   // Should have 2 data events.
   int data_count = 0;
@@ -182,7 +186,7 @@ TEST_F(TcpReassemblerTest, OutOfOrderReassembly) {
   // Now send the missing first segment.
   r->ProcessPacket(
       MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101, tcp_flags::kACK, d1),
-      MakeTs(2));
+      MakeTs(4));
 
   // Both segments should now be delivered.
   std::vector<uint8_t> all_data;
@@ -192,6 +196,13 @@ TEST_F(TcpReassemblerTest, OutOfOrderReassembly) {
     }
   }
   EXPECT_EQ(all_data, (std::vector<uint8_t>{0xAA, 0xBB, 0xCC, 0xDD}));
+  ASSERT_EQ(std::count_if(events.begin(), events.end(),
+                          [](const Event& e) { return e.type == StreamEventType::kData; }),
+            2);
+  auto first_data = std::find_if(events.begin(), events.end(),
+                                 [](const Event& e) { return e.type == StreamEventType::kData; });
+  EXPECT_EQ(first_data->timestamp, MakeTs(4));
+  EXPECT_EQ(std::next(first_data)->timestamp, MakeTs(2));
 }
 
 // ── Retransmission ignored ────────────────────────────────────────────────────
@@ -503,6 +514,36 @@ TEST_F(TcpReassemblerTest, OverlappingSegments) {
   if (all_data.size() >= 3) {
     EXPECT_EQ(all_data[0], 0x01);
   }
+}
+
+TEST_F(TcpReassemblerTest, PartialRetransmitTrim) {
+  auto r = MakeReassembler();
+  std::vector<uint8_t> empty;
+
+  r->ProcessPacket(
+      MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 100, tcp_flags::kSYN, empty),
+      MakeTs(1));
+  r->ProcessPacket(MakeTcpDissected(kServer, kServerPort, kClient, kClientPort, 200,
+                                    tcp_flags::kSYN | tcp_flags::kACK, empty),
+                   MakeTs(1));
+
+  // Deliver seq=101 with 2 bytes → next_expected=103.
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 101,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0x01, 0x02}),
+                   MakeTs(2));
+
+  // Partial retransmit starting at 102 with extra new byte.
+  r->ProcessPacket(MakeTcpDissected(kClient, kClientPort, kServer, kServerPort, 102,
+                                    tcp_flags::kACK, std::vector<uint8_t>{0x02, 0x03}),
+                   MakeTs(3));
+
+  std::vector<uint8_t> all_data;
+  for (const auto& e : events) {
+    if (e.type == StreamEventType::kData && e.direction == StreamDirection::kClientToServer) {
+      all_data.insert(all_data.end(), e.data.begin(), e.data.end());
+    }
+  }
+  EXPECT_EQ(all_data, (std::vector<uint8_t>{0x01, 0x02, 0x03}));
 }
 
 // ── Data after FIN ──────────────────────────────────────────────────────

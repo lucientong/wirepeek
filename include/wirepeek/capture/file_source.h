@@ -18,7 +18,7 @@ typedef struct pcap pcap_t;
 namespace wirepeek::capture {
 
 /// Reads packets from a pcap capture file.
-class FileSource : public CaptureSource {
+class FileSource final : public CaptureSource {
  public:
   /// Open a pcap file for reading.
   /// @param file_path Path to the .pcap or .pcapng file.
@@ -33,6 +33,7 @@ class FileSource : public CaptureSource {
   void Start(PacketCallback callback) override;
   void Stop() override;
   CaptureStats Stats() const override;
+  LinkType GetLinkType() const override { return link_type_; }
 
  private:
   struct PcapDeleter {
@@ -43,6 +44,7 @@ class FileSource : public CaptureSource {
   std::unique_ptr<pcap_t, PcapDeleter> handle_;
   std::atomic<bool> running_{false};
   uint64_t packets_read_ = 0;
+  LinkType link_type_ = LinkType::kEthernet;
 };
 
 }  // namespace wirepeek::capture

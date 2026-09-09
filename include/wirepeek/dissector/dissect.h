@@ -19,15 +19,16 @@ namespace wirepeek::dissector {
 
 /// Fully dissected packet containing all parsed protocol layers.
 struct DissectedPacket {
-  std::optional<EthernetInfo> ethernet;  ///< Layer 2 — Ethernet.
-  std::optional<IpInfo> ip;              ///< Layer 3 — IP.
-  std::optional<TcpInfo> tcp;            ///< Layer 4 — TCP.
-  std::optional<UdpInfo> udp;            ///< Layer 4 — UDP.
+  LinkType link_type = LinkType::kEthernet;  ///< Captured link-layer type.
+  std::optional<EthernetInfo> ethernet;      ///< Layer 2 — Ethernet (when applicable).
+  std::optional<IpInfo> ip;                  ///< Layer 3 — IP.
+  std::optional<TcpInfo> tcp;                ///< Layer 4 — TCP.
+  std::optional<UdpInfo> udp;                ///< Layer 4 — UDP.
 };
 
 /// Dissect a raw captured packet through all protocol layers.
 ///
-/// Chains: Ethernet → IP → TCP/UDP. Stops at the first unsupported layer
+/// Chains: Link → IP → TCP/UDP. Stops at the first unsupported layer
 /// rather than returning an error, so partial results are available.
 ///
 /// @param packet The captured packet view.

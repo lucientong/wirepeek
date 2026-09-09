@@ -10,22 +10,21 @@
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace wirepeek::exporter {
 
 /// Writes packets to a pcap file (libpcap format).
 class PcapWriter {
  public:
-  /// Open a new pcap file for writing.
+  /// Open a new pcap file for writing with the given link type.
   /// @throws std::runtime_error if file cannot be opened.
-  explicit PcapWriter(const std::string& path);
+  explicit PcapWriter(const std::string& path, LinkType link_type = LinkType::kEthernet);
   ~PcapWriter();
 
   PcapWriter(const PcapWriter&) = delete;
   PcapWriter& operator=(const PcapWriter&) = delete;
 
-  /// Write a packet to the file.
+  /// Write a packet to the file. Rejects packets whose link type differs.
   void WritePacket(const PacketView& pkt);
 
   /// Number of packets written.
@@ -38,6 +37,7 @@ class PcapWriter {
   void WriteFileHeader();
 
   std::string path_;
+  LinkType link_type_;
   int fd_ = -1;
   uint64_t count_ = 0;
 };

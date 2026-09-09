@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <wirepeek/capture/pcap_source.h>
+#include <wirepeek/dissector/link.h>
 
 #include <chrono>
 #include <pcap/pcap.h>
@@ -44,6 +45,12 @@ PcapSource::PcapSource(PcapConfig config) : config_(std::move(config)) {
     spdlog::warn("pcap_activate warning on '{}': {}", config_.interface, pcap_statustostr(status));
   }
 
+  link_type_ = dissector::MapPcapDatalink(pcap_datalink(raw));
+  if (link_type_ == LinkType::kUnknown) {
+    spdlog::warn("Unsupported datalink type {} on '{}'; packets may not dissect",
+                 pcap_datalink(raw), config_.interface);
+  }
+
   // Apply BPF filter if specified.
   if (!config_.bpf_filter.empty()) {
     struct bpf_program fp;
@@ -58,8 +65,9 @@ PcapSource::PcapSource(PcapConfig config) : config_(std::move(config)) {
     pcap_freecode(&fp);
   }
 
-  spdlog::info("Opened capture on interface '{}' (snaplen={}, filter='{}')", config_.interface,
-               config_.snaplen, config_.bpf_filter);
+  spdlog::info("Opened capture on interface '{}' (snaplen={}, filter='{}', link={})",
+               config_.interface, config_.snaplen, config_.bpf_filter,
+               static_cast<uint32_t>(link_type_));
 }
 
 PcapSource::~PcapSource() {
@@ -69,20 +77,19 @@ PcapSource::~PcapSource() {
 void PcapSource::Start(PacketCallback callback) {
   running_ = true;
 
-  // Use pcap_loop with a C-compatible callback that invokes our std::function.
   struct CallbackContext {
     PacketCallback* cb;
     std::atomic<bool>* running;
+    LinkType link_type;
   };
 
-  CallbackContext ctx{&callback, &running_};
+  CallbackContext ctx{&callback, &running_, link_type_};
 
   auto pcap_handler = [](u_char* user, const struct pcap_pkthdr* hdr, const u_char* bytes) {
     auto* ctx = reinterpret_cast<CallbackContext*>(user);
     if (!ctx->running->load(std::memory_order_relaxed))
       return;
 
-    // Convert pcap timestamp to our Timestamp type.
     auto ts = std::chrono::time_point_cast<std::chrono::microseconds>(
         std::chrono::system_clock::time_point(std::chrono::seconds(hdr->ts.tv_sec) +
                                               std::chrono::microseconds(hdr->ts.tv_usec)));
@@ -92,12 +99,12 @@ void PcapSource::Start(PacketCallback callback) {
         .timestamp = ts,
         .capture_length = hdr->caplen,
         .original_length = hdr->len,
+        .link_type = ctx->link_type,
     };
 
     (*ctx->cb)(view);
   };
 
-  // pcap_loop blocks until breakloop or error. cnt=-1 means capture indefinitely.
   int result = pcap_loop(handle_.get(), -1, pcap_handler, reinterpret_cast<u_char*>(&ctx));
 
   if (result == PCAP_ERROR && running_) {

@@ -284,5 +284,43 @@ TEST(FormatSummaryTest, EmptyPacket) {
   EXPECT_EQ(FormatSummary(empty), "(unparsed)");
 }
 
+TEST(DissectTest, NullLinkIpv4Tcp) {
+  // DLT_NULL header: AF_INET=2 little-endian + IPv4/TCP SYN
+  auto eth = MakeFullTcpPacket(12345, 80, tcp_flags::kSYN);
+  std::vector<uint8_t> raw = {0x02, 0x00, 0x00, 0x00};
+  raw.insert(raw.end(), eth.begin() + 14, eth.end());  // skip ethernet header
+
+  PacketView view{.data = raw,
+                  .capture_length = static_cast<uint32_t>(raw.size()),
+                  .link_type = LinkType::kNull};
+  auto result = Dissect(view);
+  ASSERT_TRUE(result.ip.has_value());
+  ASSERT_TRUE(result.tcp.has_value());
+  EXPECT_EQ(result.tcp->src_port, 12345);
+  EXPECT_FALSE(result.ethernet.has_value());
+}
+
+TEST(DissectTest, RawLinkIpv4) {
+  auto eth = MakeFullTcpPacket(80, 443, tcp_flags::kACK);
+  std::vector<uint8_t> raw(eth.begin() + 14, eth.end());
+  PacketView view{.data = raw,
+                  .capture_length = static_cast<uint32_t>(raw.size()),
+                  .link_type = LinkType::kRaw};
+  auto result = Dissect(view);
+  ASSERT_TRUE(result.ip.has_value());
+  ASSERT_TRUE(result.tcp.has_value());
+  EXPECT_EQ(result.tcp->dst_port, 443);
+}
+
+TEST(DissectTest, UnknownLinkTypeDoesNotAssumeEthernet) {
+  auto eth = MakeFullTcpPacket(1, 2, tcp_flags::kSYN);
+  PacketView view{.data = eth,
+                  .capture_length = static_cast<uint32_t>(eth.size()),
+                  .link_type = LinkType::kUnknown};
+  auto result = Dissect(view);
+  EXPECT_FALSE(result.ethernet.has_value());
+  EXPECT_FALSE(result.ip.has_value());
+}
+
 }  // namespace
 }  // namespace wirepeek::dissector

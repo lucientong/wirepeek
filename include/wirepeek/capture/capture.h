@@ -40,6 +40,9 @@ class CaptureSource {
 
   /// Get capture statistics.
   virtual CaptureStats Stats() const = 0;
+
+  /// Link-layer type of packets produced by this source.
+  virtual LinkType GetLinkType() const { return LinkType::kEthernet; }
 };
 
 }  // namespace wirepeek::capture
