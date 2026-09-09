@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(wirepeek
-  VERSION 1.1.0
+  VERSION 1.2.0
   LANGUAGES CXX
   DESCRIPTION "High-performance network packet analyzer with modern TUI"
 )
@@ -111,9 +111,9 @@ endif()
 
 find_package(Pcap REQUIRED)
 if(WIREPEEK_ENABLE_TLS_DECRYPT)
-  find_package(OpenSSL QUIET)
-  if(NOT OpenSSL_FOUND)
-    message(WARNING "OpenSSL not found; experimental TLS decryption support is disabled")
+  find_package(OpenSSL REQUIRED)
+  if(OpenSSL_VERSION VERSION_LESS "3.0.0")
+    message(FATAL_ERROR "WIREPEEK_ENABLE_TLS_DECRYPT requires OpenSSL 3.x (found ${OpenSSL_VERSION})")
   endif()
 endif()
 

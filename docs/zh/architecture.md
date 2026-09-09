@@ -2,7 +2,7 @@
 
 > [English](../en/architecture.md)
 
-本文说明 wirepeek **如何构建**：实现策略、关键算法与设计取舍。面向贡献者与关心内部实现的读者。完整细节以英文版为准；以下为与 v1.1 对齐的摘要。
+本文说明 wirepeek **如何构建**：实现策略、关键算法与设计取舍。面向贡献者与关心内部实现的读者。完整细节以英文版为准；以下为与 v1.2 对齐的摘要。
 
 ## 系统概览
 
@@ -20,7 +20,7 @@ TcpReassembler (乱序重组 + 捕获时间戳)
     │ StreamEvent
     ▼
 ProtocolHandler → AppEvent (HTTP / DNS / TLS / WS / Redis / h2)
-    │
+    │                └─ 可选：TLS AEAD 解密后回灌 HTTP/1、HTTP/2
     ├── Analyzer（T-Digest、端点聚合、OpenMetrics）
     ├── TUI / CLI
     └── Export（pcap / HAR / JSON）

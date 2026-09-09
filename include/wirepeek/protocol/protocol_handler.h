@@ -11,11 +11,14 @@
 #include <wirepeek/protocol/http1.h>
 #include <wirepeek/protocol/http2.h>
 #include <wirepeek/protocol/redis.h>
+#include <wirepeek/protocol/tls_keylog.h>
+#include <wirepeek/protocol/tls_session.h>
 
 #include <array>
 #include <concepts>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -42,6 +45,10 @@ class ProtocolHandler {
       : ProtocolHandler(EventCallback(std::move(callback))) {}
   ProtocolHandler(HttpCallback http_callback, RawDataCallback raw_callback = nullptr);
 
+  /// Optional SSLKEYLOGFILE store shared across streams (offline + live Refresh).
+  void SetTlsKeyLog(std::shared_ptr<TlsKeyLog> keylog) { keylog_ = std::move(keylog); }
+  [[nodiscard]] std::shared_ptr<TlsKeyLog> GetTlsKeyLog() const { return keylog_; }
+
   /// Handle a stream event from the TcpReassembler.
   void OnStreamEvent(const dissector::StreamEvent& event, Timestamp ts);
 
@@ -50,8 +57,11 @@ class ProtocolHandler {
 
  private:
   struct TlsStreamState {
-    std::array<std::vector<uint8_t>, 2> buffers;
-    std::array<bool, 2> parsed{false, false};
+    std::unique_ptr<TlsSession> session;
+    std::unique_ptr<Http1Parser> http1;
+    std::unique_ptr<Http2Parser> http2;
+    bool app_detected = false;
+    bool unknown_emitted = false;
   };
 
   struct WsStreamState {
@@ -76,12 +86,17 @@ class ProtocolHandler {
   };
 
   void Emit(const ConnectionKey& key, AppEvent event) const;
-  void FeedTls(const ConnectionKey& key, TlsStreamState& state, std::span<const uint8_t> data,
-               StreamDirection direction, Timestamp ts);
+  void FeedTls(const ConnectionKey& key, StreamState& stream, TlsStreamState& state,
+               std::span<const uint8_t> data, StreamDirection direction, Timestamp ts);
+  void RouteApplicationBytes(const ConnectionKey& key, StreamState& stream, TlsStreamState& tls,
+                             std::span<const uint8_t> data, StreamDirection direction,
+                             Timestamp ts);
   void FeedWebSocket(const ConnectionKey& key, WsStreamState& state, std::span<const uint8_t> data,
                      StreamDirection direction);
+  void AnnotateHttp(StreamState& stream, TlsStreamState* tls, HttpTransaction& txn) const;
 
   EventCallback callback_;
+  std::shared_ptr<TlsKeyLog> keylog_;
   std::unordered_map<ConnectionKey, StreamState> streams_;
   std::unordered_map<uint16_t, std::vector<PendingDns>> pending_dns_;
 };

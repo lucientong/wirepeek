@@ -144,10 +144,37 @@ jobs:
 
       - name: Run smoke corpus
         run: |
-          for target in ethernet ip tcp udp dns tls websocket http1; do
+          for target in ethernet ip tcp udp dns tls tls_record websocket http1; do
             "build-fuzz/tests/fuzz/fuzz_${target}" \
               "tests/fuzz/corpus/${target}" -runs=1000 -timeout=5
           done
+
+  tls-decrypt:
+    name: OpenSSL TLS Decrypt
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev libssl-dev
+
+      - name: Configure CMake (TLS decrypt ON)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWIREPEEK_ENABLE_TLS_DECRYPT=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run Tests
+        working-directory: build
+        run: ctest --output-on-failure --timeout 60
 
   lint:
     name: Clang-Format Check

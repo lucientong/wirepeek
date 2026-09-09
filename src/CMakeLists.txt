@@ -14,7 +14,12 @@ add_library(wirepeek_lib STATIC
   protocol/redis.cpp
   protocol/dns.cpp
   protocol/tls.cpp
+  protocol/tls_record.cpp
   protocol/tls_keylog.cpp
+  protocol/tls_cipher.cpp
+  protocol/tls_crypto.cpp
+  protocol/tls_decryptor.cpp
+  protocol/tls_session.cpp
   protocol/websocket.cpp
   protocol/protocol_handler.cpp
   analyzer/tdigest.cpp
@@ -44,7 +49,7 @@ target_link_libraries(wirepeek_lib PUBLIC
   ftxui::component
 )
 
-if(WIREPEEK_ENABLE_TLS_DECRYPT AND OpenSSL_FOUND)
+if(WIREPEEK_ENABLE_TLS_DECRYPT)
   target_link_libraries(wirepeek_lib PUBLIC OpenSSL::Crypto)
   target_compile_definitions(wirepeek_lib PUBLIC WIREPEEK_ENABLE_TLS_DECRYPT=1)
 endif()

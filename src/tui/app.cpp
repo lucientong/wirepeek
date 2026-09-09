@@ -53,7 +53,7 @@ ftxui::Color StatusColor(uint16_t code) {
 }
 
 ftxui::Color ProtocolColor(const std::string& proto) {
-  if (proto == "HTTP")
+  if (proto == "HTTP" || proto == "HTTPS")
     return ftxui::Color::Cyan;
   if (proto == "TLS")
     return ftxui::Color::Yellow;
@@ -120,7 +120,7 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
                 endpoints->Record(value);
                 state_->SetEndpoints(endpoints->Snapshot());
                 entry.timestamp = value.request.timestamp;
-                entry.protocol = "HTTP";
+                entry.protocol = value.via_tls ? "HTTPS" : "HTTP";
                 entry.method = value.request.method;
                 entry.url = value.request.url;
                 entry.status = value.response.status_code;
@@ -213,6 +213,9 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
             event);
         state_->AddEntry(std::move(entry));
       });
+  if (config_.tls_keylog)
+    protocol_handler->SetTlsKeyLog(config_.tls_keylog);
+  auto live_keylog = protocol_handler->GetTlsKeyLog();
 
   std::unique_ptr<dissector::TcpReassembler> reassembler;
   if (!config_.no_reassemble) {
@@ -228,6 +231,7 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
 
   // PPS tracking for sparkline.
   int pps_counter = 0;
+  uint64_t keylog_refresh_counter = 0;
   auto last_pps_push = std::chrono::steady_clock::now();
 
   source.Start([&](const PacketView& pkt) {
@@ -235,6 +239,9 @@ void TuiApp::CaptureLoop(capture::CaptureSource& source) {
       source.Stop();
       return;
     }
+
+    if (live_keylog && (++keylog_refresh_counter % 64) == 0)
+      live_keylog->Refresh();
 
     state_->IncrementPackets(pkt.data.size());
     stats->RecordPacket(pkt.data.size(), pkt.timestamp);

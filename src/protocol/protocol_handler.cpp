@@ -8,8 +8,10 @@
 #include <wirepeek/protocol/websocket.h>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <spdlog/spdlog.h>
+#include <string_view>
 
 namespace wirepeek::protocol {
 
@@ -54,6 +56,14 @@ size_t WsFrameSize(std::span<const uint8_t> data, const WsFrameInfo& frame) {
   return header_size + frame.payload_len;
 }
 
+bool LooksLikeHttp1(std::span<const uint8_t> data) {
+  return DetectProtocol(data) == AppProtocol::kHttp1;
+}
+
+bool LooksLikeHttp2(std::span<const uint8_t> data) {
+  return DetectProtocol(data) == AppProtocol::kHttp2;
+}
+
 }  // namespace
 
 ProtocolHandler::ProtocolHandler(EventCallback callback) : callback_(std::move(callback)) {}
@@ -78,33 +88,86 @@ void ProtocolHandler::Emit(const ConnectionKey& key, AppEvent event) const {
     callback_(key, event);
 }
 
-void ProtocolHandler::FeedTls(const ConnectionKey& key, TlsStreamState& state,
-                              std::span<const uint8_t> data, StreamDirection direction,
-                              Timestamp ts) {
-  const size_t index = DirectionIndex(direction);
-  if (state.parsed[index])
+void ProtocolHandler::AnnotateHttp(StreamState& stream, TlsStreamState* tls,
+                                   HttpTransaction& txn) const {
+  if (stream.tcp_handshake)
+    txn.timing.tcp_handshake = stream.tcp_handshake;
+  if (tls && tls->session) {
+    txn.via_tls = true;
+    txn.decrypted = true;
+    if (const auto* ch = tls->session->ClientHello())
+      txn.sni = ch->sni;
+    if (auto hs = tls->session->HandshakeDuration())
+      txn.timing.tls_handshake = hs;
+  }
+}
+
+void ProtocolHandler::RouteApplicationBytes(const ConnectionKey& key, StreamState& stream,
+                                            TlsStreamState& tls, std::span<const uint8_t> data,
+                                            StreamDirection direction, Timestamp ts) {
+  if (data.empty())
     return;
 
-  auto& buffer = state.buffers[index];
-  buffer.insert(buffer.end(), data.begin(), data.end());
-  if (buffer.size() > 256 * 1024) {
-    buffer.clear();
-    state.parsed[index] = true;
-    return;
+  if (!tls.app_detected) {
+    const std::string& alpn = tls.session ? tls.session->NegotiatedAlpn() : std::string{};
+    if (alpn == "h2" || alpn == "h2c") {
+      tls.http2 = std::make_unique<Http2Parser>(
+          [this, key](const Http2StreamEvent& frame) { Emit(key, frame); });
+      tls.app_detected = true;
+    } else if (alpn == "http/1.1" || alpn == "http/1.0" || LooksLikeHttp1(data)) {
+      tls.http1 = std::make_unique<Http1Parser>([this, key](const HttpTransaction& txn) {
+        auto stream_it = streams_.find(key);
+        HttpTransaction timed = txn;
+        TlsStreamState* tls_state = nullptr;
+        if (stream_it != streams_.end()) {
+          if (txn.response.status_code == 101 && IsWebSocketUpgrade(txn.request))
+            stream_it->second.websocket_upgrade = true;
+          if (auto* state = std::get_if<TlsStreamState>(&stream_it->second.parser))
+            tls_state = state;
+          AnnotateHttp(stream_it->second, tls_state, timed);
+        }
+        Emit(key, std::move(timed));
+      });
+      tls.app_detected = true;
+    } else if (LooksLikeHttp2(data)) {
+      tls.http2 = std::make_unique<Http2Parser>(
+          [this, key](const Http2StreamEvent& frame) { Emit(key, frame); });
+      tls.app_detected = true;
+    } else if (!tls.unknown_emitted) {
+      tls.unknown_emitted = true;
+      Emit(key, RawFlowEvent{.key = key,
+                             .dir = direction,
+                             .bytes = data.size(),
+                             .ts = ts,
+                             .protocol = AppProtocol::kTls});
+      return;
+    } else {
+      return;
+    }
   }
 
-  std::optional<TlsHandshakeInfo> info;
-  if (direction == StreamDirection::kClientToServer)
-    info = ParseTlsClientHello(buffer);
-  else
-    info = ParseTlsServerHello(buffer);
-  if (!info)
-    return;
+  if (tls.http1) {
+    tls.http1->Feed(data, direction, ts);
+    if (tls.http1->IsUpgraded() && stream.websocket_upgrade)
+      stream.parser = WsStreamState{};
+  } else if (tls.http2) {
+    tls.http2->Feed(data, direction, ts);
+  }
+}
 
-  info->timestamp = ts;
-  state.parsed[index] = true;
-  buffer.clear();
-  Emit(key, std::move(*info));
+void ProtocolHandler::FeedTls(const ConnectionKey& key, StreamState& stream, TlsStreamState& state,
+                              std::span<const uint8_t> data, StreamDirection direction,
+                              Timestamp ts) {
+  if (!state.session)
+    state.session = std::make_unique<TlsSession>(keylog_);
+
+  auto result = state.session->Feed(data, direction, ts);
+  for (auto& hs : result.handshakes)
+    Emit(key, std::move(hs));
+  for (auto& app : result.application)
+    RouteApplicationBytes(key, stream, state, app.data, app.direction, app.timestamp);
+  if (result.status)
+    spdlog::debug("TLS session status: {}", *result.status);
 }
 
 void ProtocolHandler::FeedWebSocket(const ConnectionKey& key, WsStreamState& state,
@@ -131,24 +194,20 @@ void ProtocolHandler::FeedWebSocket(const ConnectionKey& key, WsStreamState& sta
 void ProtocolHandler::OnStreamEvent(const dissector::StreamEvent& event, Timestamp ts) {
   switch (event.type) {
     case dissector::StreamEventType::kOpen: {
-      // Create stream state.
       streams_[event.key] = StreamState{};
       break;
     }
 
     case dissector::StreamEventType::kData: {
       auto it = streams_.find(event.key);
-      if (it == streams_.end()) {
-        // Stream not tracked (opened before handler was attached). Create it.
+      if (it == streams_.end())
         it = streams_.emplace(event.key, StreamState{}).first;
-      }
 
       auto& state = it->second;
       if (event.tcp_handshake)
         state.tcp_handshake = event.tcp_handshake;
       bool newly_detected = false;
 
-      // Detect protocol on first data.
       if (!state.detected && !event.data.empty()) {
         state.detection_buffer.insert(state.detection_buffer.end(), event.data.begin(),
                                       event.data.end());
@@ -188,13 +247,12 @@ void ProtocolHandler::OnStreamEvent(const dissector::StreamEvent& event, Timesta
       const std::span<const uint8_t> routed_data =
           newly_detected ? std::span<const uint8_t>(state.detection_buffer) : event.data;
 
-      // Route to parser.
       if (auto* parser = std::get_if<std::unique_ptr<Http1Parser>>(&state.parser)) {
         (*parser)->Feed(routed_data, event.direction, ts);
         if ((*parser)->IsUpgraded() && state.websocket_upgrade)
           state.parser = WsStreamState{};
       } else if (auto* tls = std::get_if<TlsStreamState>(&state.parser)) {
-        FeedTls(event.key, *tls, routed_data, event.direction, ts);
+        FeedTls(event.key, state, *tls, routed_data, event.direction, ts);
       } else if (auto* h2 = std::get_if<std::unique_ptr<Http2Parser>>(&state.parser)) {
         (*h2)->Feed(routed_data, event.direction, ts);
       } else if (auto* redis = std::get_if<std::unique_ptr<RedisParser>>(&state.parser)) {
@@ -220,6 +278,10 @@ void ProtocolHandler::OnStreamEvent(const dissector::StreamEvent& event, Timesta
           (*parser)->OnClose();
         else if (auto* parser = std::get_if<std::unique_ptr<RedisParser>>(&it->second.parser))
           (*parser)->OnClose();
+        else if (auto* tls = std::get_if<TlsStreamState>(&it->second.parser)) {
+          if (tls->http1)
+            tls->http1->OnClose();
+        }
         streams_.erase(it);
       }
       break;

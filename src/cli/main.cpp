@@ -75,7 +75,8 @@ wirepeek::ConnectionKey MakeUdpKey(const wirepeek::dissector::DissectedPacket& p
 /// Run headless mode (tcpdump-like output).
 int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool no_reassemble,
                 int count, const std::string& export_format, const std::string& output_file,
-                bool show_endpoints, const std::string& metrics_listen) {
+                bool show_endpoints, const std::string& metrics_listen,
+                std::shared_ptr<wirepeek::protocol::TlsKeyLog> tls_keylog) {
   // Set up exporters if requested.
   std::unique_ptr<wirepeek::exporter::PcapWriter> pcap_writer;
   std::unique_ptr<wirepeek::exporter::JsonWriter> json_writer;
@@ -128,12 +129,14 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
                 if (value.complete) {
                   auto latency_ms =
                       std::chrono::duration_cast<std::chrono::milliseconds>(value.latency).count();
-                  fmt::print("HTTP {} {} -> {} {} ({}ms) [{} bytes]\n", value.request.method,
+                  const char* scheme = value.via_tls ? "HTTPS" : "HTTP";
+                  fmt::print("{} {} {} -> {} {} ({}ms) [{} bytes]{}\n", scheme, value.request.method,
                              value.request.url, value.response.status_code, value.response.reason,
-                             latency_ms, value.response.body_size);
+                             latency_ms, value.response.body_size,
+                             value.decrypted ? " [decrypted]" : "");
                 } else {
-                  fmt::print("HTTP {} {} -> (no response)\n", value.request.method,
-                             value.request.url);
+                  fmt::print("{} {} {} -> (no response)\n", value.via_tls ? "HTTPS" : "HTTP",
+                             value.request.method, value.request.url);
                 }
                 if (har_writer)
                   har_writer->AddTransaction(value);
@@ -161,6 +164,9 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
             },
             event);
       });
+  if (tls_keylog)
+    protocol_handler->SetTlsKeyLog(std::move(tls_keylog));
+  auto live_keylog = protocol_handler->GetTlsKeyLog();
 
   std::unique_ptr<wirepeek::dissector::TcpReassembler> reassembler;
   if (!no_reassemble) {
@@ -171,12 +177,16 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
   }
 
   uint64_t packet_count = 0;
+  uint64_t keylog_refresh_counter = 0;
 
   source->Start([&](const wirepeek::PacketView& pkt) {
     if (!g_running) {
       source->Stop();
       return;
     }
+
+    if (live_keylog && (++keylog_refresh_counter % 64) == 0)
+      live_keylog->Refresh();
 
     auto dissected = wirepeek::dissector::Dissect(pkt);
     statistics->RecordPacket(pkt.data.size(), pkt.timestamp);
@@ -281,16 +291,22 @@ int main(int argc, char* argv[]) {
 
   spdlog::set_level(verbose ? spdlog::level::debug : spdlog::level::warn);
 
+  std::shared_ptr<wirepeek::protocol::TlsKeyLog> keylog;
   if (!tls_keylog.empty()) {
-    wirepeek::protocol::TlsKeyLog secrets;
+#if !defined(WIREPEEK_ENABLE_TLS_DECRYPT)
+    fmt::print(stderr,
+               "Error: --tls-keylog requires building with -DWIREPEEK_ENABLE_TLS_DECRYPT=ON "
+               "(OpenSSL 3.x)\n");
+    return 1;
+#else
+    keylog = std::make_shared<wirepeek::protocol::TlsKeyLog>();
     std::string error;
-    if (!secrets.Load(tls_keylog, &error)) {
+    if (!keylog->Load(tls_keylog, &error)) {
       fmt::print(stderr, "Error: {}\n", error);
       return 1;
     }
-    fmt::print(stderr,
-               "Loaded {} TLS keylog secrets; decryption is not yet implemented (experimental)\n",
-               secrets.SecretCount());
+    fmt::print(stderr, "Loaded {} TLS keylog secrets from {}\n", keylog->SecretCount(), tls_keylog);
+#endif
   }
 
   if (interface.empty() && read_file.empty()) {
@@ -320,11 +336,11 @@ int main(int argc, char* argv[]) {
 
   if (headless || !export_format.empty() || show_endpoints || !metrics_listen.empty()) {
     return RunHeadless(std::move(source), no_reassemble, count, export_format, output_file,
-                       show_endpoints, metrics_listen);
+                       show_endpoints, metrics_listen, keylog);
   }
 
   // TUI mode.
-  wirepeek::tui::TuiApp tui_app({.no_reassemble = no_reassemble});
+  wirepeek::tui::TuiApp tui_app({.no_reassemble = no_reassemble, .tls_keylog = keylog});
   tui_app.Run(std::move(source));
 
   return 0;

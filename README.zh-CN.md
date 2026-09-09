@@ -25,7 +25,7 @@
 
 ## 核心特性
 
-- **应用层协议** — HTTP/1.1（chunked、pipelining、HEAD/204/304）、DNS、TLS 握手元数据（SNI/ALPN）、WebSocket、Redis RESP、最小 HTTP/2 / gRPC 帧解析
+- **应用层协议** — HTTP/1.1（chunked、pipelining、HEAD/204/304）、DNS、TLS 握手元数据（SNI/ALPN）、可选 SSLKEYLOGFILE TLS 1.2/1.3 解密、WebSocket、Redis RESP、最小 HTTP/2 / gRPC 帧解析
 - **请求/响应视图** — 方法、URL、状态码、请求头、大小与基于抓包时间戳的延迟
 - **被动 APM** — 归一化端点统计、TCP 握手 / TTFB / 传输时长、OpenMetrics 导出
 - **现代终端界面** — 可滚动列表、详情面板、流量 sparkline、过滤、暂停/跟随、端点视图（`e`）
@@ -67,6 +67,11 @@ sudo cmake --install build
 可选构建：
 
 ```bash
+# TLS 解密（需要 OpenSSL 3.x）
+cmake -B build-tls -DWIREPEEK_ENABLE_TLS_DECRYPT=ON -DCMAKE_BUILD_TYPE=Release
+# macOS Homebrew：
+# cmake -B build-tls -DWIREPEEK_ENABLE_TLS_DECRYPT=ON -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+
 cmake -B build-bench -DWIREPEEK_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-bench -j$(nproc)
 
@@ -84,7 +89,8 @@ sudo wirepeek --headless -i eth0 -c 100
 sudo wirepeek -i eth0 --export har -o output.har
 wirepeek --headless --read capture.pcap --endpoints
 sudo wirepeek --headless -i eth0 --metrics-listen 127.0.0.1:9464
-wirepeek --read capture.pcap --tls-keylog sslkeys.log   # 实验性：仅解析密钥，尚不解密
+# TLS 解密（仅 OpenSSL 启用构建；需已有 SSLKEYLOGFILE，不会猜测密钥）
+wirepeek --read capture.pcap --tls-keylog sslkeys.log --headless
 ```
 
 ## 架构
@@ -100,7 +106,8 @@ wirepeek --read capture.pcap --tls-keylog sslkeys.log   # 实验性：仅解析�
 |------|------|
 | **v1.0.x** | 正确性：抓包时间戳、HTTP framing、链路层、DNS/TLS/WS 接线 |
 | **v1.1.x** | APM：端点聚合、时延拆解、Redis、OpenMetrics、benchmark/fuzz |
-| **后续** | 完整 TLS 解密（当前 keylog 为实验性）、更完整 HPACK、MySQL/PostgreSQL |
+| **v1.2.x** | TLS 1.2/1.3 AEAD 解密（SSLKEYLOGFILE，可选 OpenSSL 构建） |
+| **后续** | 更完整 HPACK、MySQL/PostgreSQL、QUIC |
 
 ## 贡献
 

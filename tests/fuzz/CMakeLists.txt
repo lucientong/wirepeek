@@ -5,6 +5,7 @@ set(WIREPEEK_FUZZ_TARGETS
   fuzz_udp
   fuzz_dns
   fuzz_tls
+  fuzz_tls_record
   fuzz_websocket
   fuzz_http1
 )

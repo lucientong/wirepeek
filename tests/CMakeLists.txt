@@ -19,6 +19,9 @@ add_executable(wirepeek_tests
   unit/test_stage5_support.cpp
   unit/test_dns.cpp
   unit/test_tls.cpp
+  unit/test_tls_record.cpp
+  unit/test_tls_crypto.cpp
+  unit/test_tls_decrypt_integration.cpp
   unit/test_websocket.cpp
   unit/test_export.cpp
   unit/test_ui_state.cpp

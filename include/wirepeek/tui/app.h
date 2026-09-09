@@ -7,6 +7,7 @@
 #pragma once
 
 #include <wirepeek/capture/capture.h>
+#include <wirepeek/protocol/tls_keylog.h>
 #include <wirepeek/tui/ui_state.h>
 
 #include <atomic>
@@ -18,6 +19,7 @@ namespace wirepeek::tui {
 /// TUI application configuration.
 struct TuiConfig {
   bool no_reassemble = false;
+  std::shared_ptr<protocol::TlsKeyLog> tls_keylog;
 };
 
 /// Main TUI application.

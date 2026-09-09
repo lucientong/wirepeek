@@ -139,9 +139,18 @@ kStartLine → kHeaders → kBody → kComplete → kStartLine (pipeline)
 
 Operates on raw UDP payload (not via TCP reassembly). Key challenge: **name compression** — DNS names can contain pointer labels (`0xC0 xx`) that reference earlier parts of the packet. `ParseDnsName()` follows pointers recursively with a depth limit to prevent infinite loops.
 
-### 4.6 TLS Handshake Parser
+### 4.6 TLS Handshake & Decryption
 
-Parses only the handshake metadata (no decryption). The key value is **SNI extraction** from ClientHello extensions — this tells you which domain the client is connecting to, even though the traffic is encrypted. Extension parsing: walk the variable-length extension list, match by type ID (0x0000=SNI, 0x0010=ALPN, 0x002B=supported\_versions).
+Handshake metadata (SNI, ALPN, version, cipher suite, client/server random) is parsed without secrets.
+
+Optional decryption (`WIREPEEK_ENABLE_TLS_DECRYPT`, OpenSSL 3.x) consumes NSS-style `SSLKEYLOGFILE` secrets:
+
+1. `TlsRecordFramer` / handshake reassembly per TCP direction
+2. `TlsKeyLog` incremental tail for offline + live capture
+3. OpenSSL EVP AEAD (TLS 1.2/1.3 AES-GCM and ChaCha20-Poly1305); fail-closed on auth failure
+4. Plaintext is routed privately into existing HTTP/1 and HTTP/2 parsers (no recursive `OnStreamEvent`)
+
+Unsupported suites, missing keys, or mid-flow joins degrade to metadata-only observation.
 
 ### 4.7 Statistics & T-Digest
 

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-10
+
+### Added
+
+- Optional TLS 1.2/1.3 AEAD decryption via SSLKEYLOGFILE (`-DWIREPEEK_ENABLE_TLS_DECRYPT=ON`, OpenSSL 3.x).
+- Supported suites: AES-128/256-GCM and ChaCha20-Poly1305 for TLS 1.2 and TLS 1.3.
+- Incremental keylog tailing for live capture (append / truncate / rotate safe).
+- Decrypted HTTP/1 and HTTP/2 plaintext re-fed into existing parsers; HTTPS shown in TUI/CLI; HAR/JSON/endpoints/metrics reused.
+- TLS record framer, handshake reassembly, fail-closed AEAD auth, KeyUpdate handling.
+- Known-answer crypto tests, synthetic decrypt integration tests, `fuzz_tls_record`, OpenSSL-enabled CI job.
+
+### Changed
+
+- `--tls-keylog` now requires an OpenSSL-enabled build; without it the CLI exits with a clear error.
+- Project version bumped to 1.2.0.
+
+### Security / Privacy
+
+- Keylog decryption is passive and only works when the operator already has NSS-style secrets.
+- Authentication failures never emit plaintext; unsupported suites degrade to TLS metadata mode.
+
 ## [1.1.0] - 2026-09-09
 
 ### Added

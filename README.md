@@ -25,7 +25,7 @@
 
 ## Features
 
-- **Application protocols** — HTTP/1.1 (chunked, pipelining, HEAD/204/304), DNS, TLS handshake metadata (SNI/ALPN), WebSocket frames, Redis RESP, minimal HTTP/2 / gRPC framing
+- **Application protocols** — HTTP/1.1 (chunked, pipelining, HEAD/204/304), DNS, TLS handshake metadata (SNI/ALPN), optional TLS 1.2/1.3 decryption via SSLKEYLOGFILE, WebSocket frames, Redis RESP, minimal HTTP/2 / gRPC framing
 - **Request/Response View** — Method, URL, status, headers, sizes, and capture-time latency
 - **Passive APM** — Normalized endpoint stats, TCP handshake / TTFB / transfer timing, OpenMetrics export
 - **Modern TUI** — Scrollable lists, detail panels, sparklines, filters, pause/follow, endpoint view (`e`)
@@ -90,6 +90,11 @@ sudo cmake --install build
 Optional builds:
 
 ```bash
+# TLS decryption (requires OpenSSL 3.x)
+cmake -B build-tls -DWIREPEEK_ENABLE_TLS_DECRYPT=ON -DCMAKE_BUILD_TYPE=Release
+# macOS Homebrew OpenSSL tip:
+# cmake -B build-tls -DWIREPEEK_ENABLE_TLS_DECRYPT=ON -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+
 cmake -B build-bench -DWIREPEEK_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-bench -j$(nproc)
 
@@ -121,8 +126,9 @@ wirepeek --headless --read capture.pcap --endpoints
 # Serve Prometheus/OpenMetrics while capturing
 sudo wirepeek --headless -i eth0 --metrics-listen 127.0.0.1:9464
 
-# Load SSLKEYLOGFILE secrets (experimental; parsing only, no decryption yet)
-wirepeek --read capture.pcap --tls-keylog sslkeys.log
+# Decrypt TLS with SSLKEYLOGFILE (OpenSSL-enabled build only)
+# Privacy: only works when you already have the process key log; never guess keys.
+wirepeek --read capture.pcap --tls-keylog sslkeys.log --headless
 ```
 
 ### Example Output (Headless Mode)
@@ -178,7 +184,8 @@ throughput claims only after measuring with the [benchmark suite](docs/en/benchm
 |------|-------|
 | **v1.0.x** | Correctness: capture timestamps, HTTP framing, link types, DNS/TLS/WS wiring |
 | **v1.1.x** | PassivePM: endpoint aggregation, timing breakdown, Redis, OpenMetrics, benchmarks/fuzz |
-| **Later** | Full TLS decryption (experimental keylog today), richer HPACK, MySQL/PostgreSQL |
+| **v1.2.x** | TLS 1.2/1.3 AEAD decryption via SSLKEYLOGFILE (optional OpenSSL build) |
+| **Later** | Richer HPACK, MySQL/PostgreSQL, QUIC |
 
 ## Contributing
 
