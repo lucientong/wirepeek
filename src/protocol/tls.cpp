@@ -4,10 +4,9 @@
 #include <wirepeek/endian.h>
 #include <wirepeek/protocol/tls.h>
 
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <cctype>
+#include <fmt/format.h>
 
 namespace wirepeek::protocol {
 
@@ -109,8 +108,7 @@ std::optional<TlsHandshakeInfo> ParseTlsClientHelloBody(std::span<const uint8_t>
           const uint16_t name_len = ReadU16Be(body.data() + sni_pos);
           sni_pos += 2;
           if (sni_pos + name_len <= pos + ext_len) {
-            info.sni =
-                std::string(reinterpret_cast<const char*>(body.data() + sni_pos), name_len);
+            info.sni = std::string(reinterpret_cast<const char*>(body.data() + sni_pos), name_len);
           }
         }
       }

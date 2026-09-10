@@ -4,9 +4,8 @@
 #include <wirepeek/protocol/tls.h>
 #include <wirepeek/protocol/tls_record.h>
 
-#include <gtest/gtest.h>
-
 #include <cstdint>
+#include <gtest/gtest.h>
 #include <span>
 #include <vector>
 
@@ -94,10 +93,10 @@ TEST(TlsParseTest, ExtractsClientRandom) {
   body.insert(body.end(), {0x03, 0x03});
   for (int i = 0; i < 32; ++i)
     body.push_back(static_cast<uint8_t>(i));
-  body.push_back(0x00);                    // session id len
+  body.push_back(0x00);  // session id len
   body.insert(body.end(), {0x00, 0x02, 0xC0, 0x2F});
-  body.insert(body.end(), {0x01, 0x00});    // compression
-  body.insert(body.end(), {0x00, 0x00});    // extensions
+  body.insert(body.end(), {0x01, 0x00});  // compression
+  body.insert(body.end(), {0x00, 0x00});  // extensions
 
   auto info = ParseTlsClientHelloBody(body);
   ASSERT_TRUE(info);

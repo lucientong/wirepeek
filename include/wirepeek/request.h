@@ -94,10 +94,10 @@ struct HttpTransaction {
   HttpResponse response;
   std::chrono::microseconds latency{0};  ///< Time from request to first response byte.
   TimingBreakdown timing;
-  bool complete = false;  ///< True if both request and response are parsed.
-  bool via_tls = false;   ///< True when observed inside a TLS session.
-  bool decrypted = false; ///< True when HTTP was recovered via TLS decryption.
-  std::string sni;        ///< SNI from the enclosing TLS ClientHello, if any.
+  bool complete = false;   ///< True if both request and response are parsed.
+  bool via_tls = false;    ///< True when observed inside a TLS session.
+  bool decrypted = false;  ///< True when HTTP was recovered via TLS decryption.
+  std::string sni;         ///< SNI from the enclosing TLS ClientHello, if any.
 };
 
 // ── Redis ────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ struct TlsHandshakeInfo {
   std::array<uint8_t, 32> server_random{};  ///< ServerHello.random.
   bool has_client_random = false;
   bool has_server_random = false;
-  bool is_client_hello = false;   ///< True if parsed from ClientHello.
+  bool is_client_hello = false;  ///< True if parsed from ClientHello.
   Timestamp timestamp;
 };
 

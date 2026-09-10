@@ -112,8 +112,17 @@ endif()
 find_package(Pcap REQUIRED)
 if(WIREPEEK_ENABLE_TLS_DECRYPT)
   find_package(OpenSSL REQUIRED)
-  if(OpenSSL_VERSION VERSION_LESS "3.0.0")
-    message(FATAL_ERROR "WIREPEEK_ENABLE_TLS_DECRYPT requires OpenSSL 3.x (found ${OpenSSL_VERSION})")
+  # FindOpenSSL exposed OPENSSL_VERSION before CMake 4.2 and OpenSSL_VERSION
+  # starting with CMake 4.2. Support both spellings so CI and local builds agree.
+  if(DEFINED OpenSSL_VERSION)
+    set(WIREPEEK_OPENSSL_VERSION "${OpenSSL_VERSION}")
+  else()
+    set(WIREPEEK_OPENSSL_VERSION "${OPENSSL_VERSION}")
+  endif()
+  if(NOT WIREPEEK_OPENSSL_VERSION OR WIREPEEK_OPENSSL_VERSION VERSION_LESS "3.0.0")
+    message(FATAL_ERROR
+      "WIREPEEK_ENABLE_TLS_DECRYPT requires OpenSSL 3.x "
+      "(found ${WIREPEEK_OPENSSL_VERSION})")
   endif()
 endif()
 

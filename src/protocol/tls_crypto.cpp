@@ -30,8 +30,8 @@ const char* DigestName(TlsHash hash) {
   return hash == TlsHash::kSha384 ? "SHA384" : "SHA256";
 }
 
-std::optional<std::vector<uint8_t>> EvpKdfDerive(const char* kdf_name,
-                                                 const OSSL_PARAM* params, size_t out_len) {
+std::optional<std::vector<uint8_t>> EvpKdfDerive(const char* kdf_name, const OSSL_PARAM* params,
+                                                 size_t out_len) {
   EVP_KDF* kdf = EVP_KDF_fetch(nullptr, kdf_name, nullptr);
   if (!kdf)
     return std::nullopt;
@@ -75,7 +75,8 @@ std::optional<std::vector<uint8_t>> Tls13HkdfExpandLabel(TlsHash hash,
   (void)length;
   return std::nullopt;
 #else
-  // HkdfLabel = uint16 length || uint8 label_len || "tls13 " + label || uint8 context_len || context
+  // HkdfLabel = uint16 length || uint8 label_len || "tls13 " + label || uint8 context_len ||
+  // context
   const std::string full_label = std::string("tls13 ") + std::string(label);
   std::vector<uint8_t> hkdf_label;
   hkdf_label.reserve(2 + 1 + full_label.size() + 1 + context.size());
@@ -90,7 +91,7 @@ std::optional<std::vector<uint8_t>> Tls13HkdfExpandLabel(TlsHash hash,
   OSSL_PARAM params[] = {
       OSSL_PARAM_construct_int(OSSL_KDF_PARAM_MODE, &mode),
       OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, const_cast<char*>(DigestName(hash)),
-                                      0),
+                                       0),
       OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_KEY, const_cast<uint8_t*>(secret.data()),
                                         secret.size()),
       OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_INFO, hkdf_label.data(), hkdf_label.size()),
@@ -116,10 +117,11 @@ std::optional<std::vector<uint8_t>> Tls13UpdateTrafficSecret(
   return Tls13HkdfExpandLabel(suite.hash, traffic_secret, "traffic upd", {}, suite.hash_len);
 }
 
-std::optional<std::vector<uint8_t>> Tls12PrfKeyBlock(
-    const TlsCipherSuiteInfo& suite, std::span<const uint8_t> master_secret,
-    std::span<const uint8_t, 32> client_random, std::span<const uint8_t, 32> server_random,
-    size_t length) {
+std::optional<std::vector<uint8_t>> Tls12PrfKeyBlock(const TlsCipherSuiteInfo& suite,
+                                                     std::span<const uint8_t> master_secret,
+                                                     std::span<const uint8_t, 32> client_random,
+                                                     std::span<const uint8_t, 32> server_random,
+                                                     size_t length) {
 #if !defined(WIREPEEK_ENABLE_TLS_DECRYPT)
   (void)suite;
   (void)master_secret;
@@ -134,11 +136,10 @@ std::optional<std::vector<uint8_t>> Tls12PrfKeyBlock(
   std::copy(client_random.begin(), client_random.end(), seed.begin() + 32);
 
   OSSL_PARAM params[] = {
-      OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, const_cast<char*>(suite.openssl_digest),
-                                      0),
-      OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SECRET,
-                                        const_cast<uint8_t*>(master_secret.data()),
-                                        master_secret.size()),
+      OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST,
+                                       const_cast<char*>(suite.openssl_digest), 0),
+      OSSL_PARAM_construct_octet_string(
+          OSSL_KDF_PARAM_SECRET, const_cast<uint8_t*>(master_secret.data()), master_secret.size()),
       OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_SEED, const_cast<char*>("key expansion"), 0),
       // OpenSSL TLS1-PRF expects seed parts via repeated SEED params; also accept DATA.
       OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SEED, seed.data(), seed.size()),
@@ -156,11 +157,10 @@ std::optional<std::vector<uint8_t>> Tls12PrfKeyBlock(
   std::copy(client_random.begin(), client_random.end(), seed2.begin() + 32);
   char label[] = "key expansion";
   OSSL_PARAM params2[] = {
-      OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, const_cast<char*>(suite.openssl_digest),
-                                      0),
-      OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SECRET,
-                                        const_cast<uint8_t*>(master_secret.data()),
-                                        master_secret.size()),
+      OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST,
+                                       const_cast<char*>(suite.openssl_digest), 0),
+      OSSL_PARAM_construct_octet_string(
+          OSSL_KDF_PARAM_SECRET, const_cast<uint8_t*>(master_secret.data()), master_secret.size()),
       OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SEED, label, sizeof(label) - 1),
       OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SEED, seed2.data(), seed2.size()),
       OSSL_PARAM_construct_end(),
@@ -169,9 +169,10 @@ std::optional<std::vector<uint8_t>> Tls12PrfKeyBlock(
 #endif
 }
 
-std::optional<Tls12DirectionKeys> Tls12DeriveKeys(
-    const TlsCipherSuiteInfo& suite, std::span<const uint8_t> master_secret,
-    std::span<const uint8_t, 32> client_random, std::span<const uint8_t, 32> server_random) {
+std::optional<Tls12DirectionKeys> Tls12DeriveKeys(const TlsCipherSuiteInfo& suite,
+                                                  std::span<const uint8_t> master_secret,
+                                                  std::span<const uint8_t, 32> client_random,
+                                                  std::span<const uint8_t, 32> server_random) {
   // key_block = client_write_key || server_write_key || client_write_IV || server_write_IV
   // (MAC keys omitted for AEAD)
   const size_t needed = suite.key_len * 2 + suite.iv_len * 2;
@@ -254,8 +255,8 @@ TlsDecryptResult AeadDecrypt(const TlsCipherSuiteInfo& suite, std::span<const ui
 
   result.plaintext.resize(ct_len);
   if (ct_len > 0) {
-    if (EVP_DecryptUpdate(ctx, result.plaintext.data(), &len, ciphertext, static_cast<int>(ct_len)) !=
-        1)
+    if (EVP_DecryptUpdate(ctx, result.plaintext.data(), &len, ciphertext,
+                          static_cast<int>(ct_len)) != 1)
       return fail(TlsDecryptStatus::kAuthFailed);
   } else {
     len = 0;

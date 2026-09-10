@@ -130,9 +130,9 @@ int RunHeadless(std::unique_ptr<wirepeek::capture::CaptureSource> source, bool n
                   auto latency_ms =
                       std::chrono::duration_cast<std::chrono::milliseconds>(value.latency).count();
                   const char* scheme = value.via_tls ? "HTTPS" : "HTTP";
-                  fmt::print("{} {} {} -> {} {} ({}ms) [{} bytes]{}\n", scheme, value.request.method,
-                             value.request.url, value.response.status_code, value.response.reason,
-                             latency_ms, value.response.body_size,
+                  fmt::print("{} {} {} -> {} {} ({}ms) [{} bytes]{}\n", scheme,
+                             value.request.method, value.request.url, value.response.status_code,
+                             value.response.reason, latency_ms, value.response.body_size,
                              value.decrypted ? " [decrypted]" : "");
                 } else {
                   fmt::print("{} {} {} -> (no response)\n", value.via_tls ? "HTTPS" : "HTTP",

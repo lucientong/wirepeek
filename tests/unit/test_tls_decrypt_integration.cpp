@@ -9,10 +9,9 @@
 #include <wirepeek/protocol/tls_keylog.h>
 #include <wirepeek/protocol/tls_record.h>
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
+#include <gtest/gtest.h>
 #include <memory>
 #include <optional>
 #include <span>
@@ -146,15 +145,15 @@ std::vector<uint8_t> EncryptTls13AppData(const TlsCipherSuiteInfo& suite,
   int len = 0;
   EXPECT_EQ(EVP_EncryptUpdate(ctx, nullptr, &len, aad.data(), static_cast<int>(aad.size())), 1);
   std::vector<uint8_t> ciphertext(inner.size());
-  EXPECT_EQ(EVP_EncryptUpdate(ctx, ciphertext.data(), &len, inner.data(),
-                              static_cast<int>(inner.size())),
-            1);
+  EXPECT_EQ(
+      EVP_EncryptUpdate(ctx, ciphertext.data(), &len, inner.data(), static_cast<int>(inner.size())),
+      1);
   int final_len = 0;
   EXPECT_EQ(EVP_EncryptFinal_ex(ctx, ciphertext.data() + len, &final_len), 1);
   std::vector<uint8_t> tag(suite.tag_len);
-  EXPECT_EQ(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, static_cast<int>(suite.tag_len),
-                                tag.data()),
-            1);
+  EXPECT_EQ(
+      EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, static_cast<int>(suite.tag_len), tag.data()),
+      1);
   EVP_CIPHER_CTX_free(ctx);
   EVP_CIPHER_free(cipher);
 
@@ -199,10 +198,10 @@ TEST(TlsDecryptIntegrationTest, RecoversHttp1FromTls13AppData) {
   const auto random_hex = HexEncode(client_random);
 
   auto keylog = std::make_shared<TlsKeyLog>();
-  ASSERT_TRUE(keylog->ParseLine("CLIENT_TRAFFIC_SECRET_0 " + random_hex + " " +
-                                HexEncode(client_secret)));
-  ASSERT_TRUE(keylog->ParseLine("SERVER_TRAFFIC_SECRET_0 " + random_hex + " " +
-                                HexEncode(server_secret)));
+  ASSERT_TRUE(
+      keylog->ParseLine("CLIENT_TRAFFIC_SECRET_0 " + random_hex + " " + HexEncode(client_secret)));
+  ASSERT_TRUE(
+      keylog->ParseLine("SERVER_TRAFFIC_SECRET_0 " + random_hex + " " + HexEncode(server_secret)));
 
   std::optional<HttpTransaction> seen;
   ProtocolHandler handler([&](const ConnectionKey&, const AppEvent& event) {
@@ -227,8 +226,7 @@ TEST(TlsDecryptIntegrationTest, RecoversHttp1FromTls13AppData) {
 
   auto suite = LookupCipherSuite(0x1301);
   ASSERT_TRUE(suite);
-  const std::string req =
-      "GET /hello HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n";
+  const std::string req = "GET /hello HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n";
   const std::string resp = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
   const auto req_bytes = std::vector<uint8_t>(req.begin(), req.end());
   const auto resp_bytes = std::vector<uint8_t>(resp.begin(), resp.end());
